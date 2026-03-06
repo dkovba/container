@@ -90,7 +90,7 @@ public struct Filesystem: Sendable, Codable {
 
     /// A block based filesystem.
     public static func block(
-        format: String, source: String, destination: String, options: MountOptions, cache: CacheMode = .on,
+        format: String, source: String, destination: String, options: MountOptions, cache: CacheMode = .off,
         sync: SyncMode = .fsync
     ) -> Filesystem {
         .init(
