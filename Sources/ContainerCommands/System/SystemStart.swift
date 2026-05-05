@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 22:05 — 1 critical, 3 high, 0 medium, 0 low (4 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -87,7 +88,9 @@ extension Application {
             }
 
             let apiServerDataUrl = appRoot.appending(path: "apiserver")
-            try! FileManager.default.createDirectory(at: apiServerDataUrl, withIntermediateDirectories: true)
+            // Flagged #1: CRITICAL: `try!` crashes the process on directory creation failure
+            // `try! FileManager.default.createDirectory(at:withIntermediateDirectories:)` uses a force-try, which unconditionally terminates the process with a fatal error if the call throws — for example due to a permissions error or a read-only filesystem.
+            try FileManager.default.createDirectory(at: apiServerDataUrl, withIntermediateDirectories: true)
 
             var env = PluginLoader.filterEnvironment()
             env[ApplicationRoot.environmentName] = appRoot.path(percentEncoded: false)
@@ -126,7 +129,9 @@ extension Application {
             }
 
             if await !initImageExists() {
-                try? await installInitialFilesystem()
+                // Flagged #2: HIGH: `try?` silently discards errors from `installInitialFilesystem()`
+                // `try? await installInitialFilesystem()` silently swallows any error the function throws. In particular, `installInitialFilesystem()` begins with `try ImagePull.parse()`, which can throw; that error is completely lost by `try?`, leaving the caller with no indication that the initial filesystem installation failed and no way to surface the failure to the user.
+                try await installInitialFilesystem()
             }
 
             guard await !kernelExists() else {
@@ -137,13 +142,18 @@ extension Application {
 
         private func installInitialFilesystem() async throws {
             let dep = Dependencies.initFs
-            var pullCommand = try ImagePull.parse()
+            // Flagged #4: HIGH: `ImagePull.parse()` parses the wrong process arguments in `installInitialFilesystem()`
+            // `var pullCommand = try ImagePull.parse()` calls ArgumentParser's `parse()` with no arguments, which causes it to read from `CommandLine.arguments` — the arguments of the running `SystemStart` process (e.g. `["system", "start", ...]`). `ImagePull` expects a single positional `reference` argument followed by no other positional arguments, so feeding it SystemStart's arguments causes parsing to fail: the first token (`"system"`) is consumed as `reference`, and the next token (`"start"`) is an unexpected positional, producing a parse error. Even if parsing happened to succeed, the immediately following line `pullCommand.reference = dep.source` overwrites whatever `reference` was set to, making the `parse()` call pointless as a means of setting that value.
+            var pullCommand = ImagePull(reference: dep.source)
             pullCommand.reference = dep.source
             print("Installing base container filesystem...")
             do {
                 try await pullCommand.run()
             } catch {
                 log.error("failed to install base container filesystem", metadata: ["error": "\(error)"])
+                // Flagged #3: HIGH: `do-catch` in `installInitialFilesystem()` silently swallows `pullCommand.run()` errors
+                // Inside `installInitialFilesystem()`, the `do-catch` block catches any error thrown by `try await pullCommand.run()`, logs it via `log.error(...)`, and then returns normally without re-throwing. The function is declared `throws`, so callers expect a thrown error to signal failure. Because the error is swallowed here, even a caller that uses `try await installInitialFilesystem()` receives a normal return and has no indication that the image pull failed.
+                throw error
             }
         }
 

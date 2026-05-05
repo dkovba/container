@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 05:47 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -46,7 +47,8 @@ let globTestCases = [
 ]
 
 let errorGlobTestCases = [
-    TestCase(pattern: "[]a]", fileName: "]", expectSuccess: true),
+    // Flagged #1: MEDIUM: `errorGlobTestCases` includes `"[]a]"` which produces a valid regex and never throws
+    // `TestCase(pattern: "[]a]", fileName: "]", expectSuccess: true)` was listed in `errorGlobTestCases`, so `testInvalidGlob` called `glob("]", "[]a]")` and expected it to throw. The `glob` function converts the glob pattern to a regex by calling `NSRegularExpression.escapedPattern(for:)` and then un-escaping glob metacharacters. Because `]` is not a regex metacharacter outside a character class in NSRegularExpression/ICU, `escapedPattern` escapes only `[`, producing `"\\[]a]"`. The subsequent `"\\["` → `"["` substitution yields the final regex `"^[]a]$"`. Swift's `Regex` engine (which follows PCRE semantics) treats `]` as a literal when it is the first character inside a character class, so `[]a]` is a valid class matching `]` or `a`, and `try Regex("^[]a]$")` does not throw. As a result, `testInvalidGlob` always failed for this test case: it expected a throw but the function returned `true`.
     TestCase(pattern: "[", fileName: "a", expectSuccess: true),
     TestCase(pattern: "[^", fileName: "a", expectSuccess: true),
     TestCase(pattern: "[^bc", fileName: "a", expectSuccess: true),

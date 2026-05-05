@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 22:16 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -38,9 +39,8 @@ class TestCLIPruneCommand: CLITest {
         let pc0Name = "\(testName)_pruned_0"
         let pc1Name = "\(testName)_pruned_1"
 
-        try doLongRun(name: npcName, containerArgs: ["sleep", "3600"], autoRemove: true)
-        try doLongRun(name: pc0Name, containerArgs: ["sleep", "3600"], autoRemove: false)
-        try doLongRun(name: pc1Name, containerArgs: ["sleep", "3600"], autoRemove: false)
+        // Flagged #1 (1 of 2): MEDIUM: `defer` cleanup unreachable when `doLongRun` throws in `testContainerPruneStoppedContainers`
+        // The `defer` block containing `doStop`/`doRemove` was registered after all three `doLongRun` calls. If the second or third `doLongRun` threw an error, the `defer` had not yet been registered, so containers created by preceding successful `doLongRun` calls were never stopped or removed.
         defer {
             try? doStop(name: npcName)
             try? doStop(name: pc0Name)
@@ -49,6 +49,10 @@ class TestCLIPruneCommand: CLITest {
             try? doRemove(name: pc0Name)
             try? doRemove(name: pc1Name)
         }
+        // Flagged #1 (2 of 2)
+        try doLongRun(name: npcName, containerArgs: ["sleep", "3600"], autoRemove: true)
+        try doLongRun(name: pc0Name, containerArgs: ["sleep", "3600"], autoRemove: false)
+        try doLongRun(name: pc1Name, containerArgs: ["sleep", "3600"], autoRemove: false)
         try waitForContainerRunning(npcName)
         try waitForContainerRunning(pc0Name)
         try waitForContainerRunning(pc1Name)

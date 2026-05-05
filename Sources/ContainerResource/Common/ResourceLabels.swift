@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-03 00:18 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -48,7 +49,9 @@ public struct ResourceLabels: Sendable, Equatable {
             throw LabelError(code: .invalidLabelKeyLength, metadata: ["key": key, "maxLength": "\(Self.keyLengthMax)"])
         }
         let dockerPattern = #/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/#
-        let ociPattern = #/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?:/(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*))*$/#
+        // Flagged #1: MEDIUM: `validateLabelKey(_:)` accepts OCI label keys with trailing slashes
+        // The OCI pattern wrapped the path-segment subexpression in an extra `(?:...)*` non-capturing group, making the content after each `/` optional (zero repetitions allowed). As a result, keys ending with a bare slash — such as `com.apple/` — matched the OCI pattern and passed validation when they should have been rejected.
+        let ociPattern = #/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?:/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)*$/#
         let dockerMatch = !key.ranges(of: dockerPattern).isEmpty
         let ociMatch = !key.ranges(of: ociPattern).isEmpty
         guard dockerMatch || ociMatch else {

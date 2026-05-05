@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 17:47 — 0 critical, 1 high, 1 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -63,11 +64,12 @@ extension Application {
                 do {
                     try pf.createRedirectRule(from: from, to: to, domain: domainName)
                 } catch {
-                    _ = try resolver.deleteDomain(name: domainName)
+                    // Flagged #1: HIGH: Cleanup error masks original error in `createRedirectRule` catch block
+                    // `_ = try resolver.deleteDomain(name: domainName)` uses `try` inside a `catch` block. If `deleteDomain` throws, its error propagates out of the catch block and the original error from `createRedirectRule` is lost.
+                    _ = try? resolver.deleteDomain(name: domainName)
                     throw error
                 }
             }
-            print(domainName)
 
             if localhostIP != nil {
                 do {
@@ -84,6 +86,10 @@ extension Application {
             } catch {
                 throw ContainerizationError(.invalidState, message: "mDNSResponder restart failed, run `sudo killall -HUP mDNSResponder` to deactivate domain")
             }
+
+            // Flagged #2: MEDIUM: `print(domainName)` outputs success before operations complete
+            // `print(domainName)` is placed after domain and redirect-rule creation but before `pf.reinitialize()` and `HostDNSResolver.reinitialize()`. If either reinitialize call throws, the user sees the domain name printed (indicating success) followed by an error.
+            print(domainName)
         }
     }
 }

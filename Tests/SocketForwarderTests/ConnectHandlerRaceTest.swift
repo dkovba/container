@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 15:12 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -57,7 +58,9 @@ struct ConnectHandlerRaceTest {
             try await group.waitForAll()
         }
 
-        serverChannel.eventLoop.execute { _ = serverChannel.close() }
+        // Flagged #1: MEDIUM: `serverChannel.close()` wrapped in `eventLoop.execute` can silently drop the close
+        // `serverChannel.eventLoop.execute { _ = serverChannel.close() }` schedules the close via `eventLoop.execute` instead of calling `Channel.close()` directly. `Channel.close()` is already thread-safe and dispatches internally to the event loop, so the extra `execute` wrapper is redundant. More critically, if the event loop is shutting down or under the heavy load that this test intentionally induces with 500 concurrent connections, the scheduled block can be silently discarded, meaning the channel is never closed and `try await serverChannel.closeFuture.get()` hangs indefinitely.
+        _ = serverChannel.close()
         try await serverChannel.closeFuture.get()
 
         forwarderResult.close()

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-06 15:03 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -232,6 +233,19 @@ public struct XPCServer: Sendable {
                 }
                 xpc_connection_send_message(connection, reply.underlying)
             }
+        // Flagged #1: HIGH: `handleMessage` never replies for unknown routes
+        // The `if let handler = routes[route]` block had no `else` clause.
+        } else {
+            log.error(
+                "invalid request - unknown route",
+                metadata: [
+                    "route": "\(route)",
+                ])
+            Self.replyWithError(
+                connection: connection,
+                object: object,
+                err: ContainerizationError(.invalidArgument, message: "unknown route: \(route)")
+            )
         }
     }
 

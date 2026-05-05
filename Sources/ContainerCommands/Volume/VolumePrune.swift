@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 23:43 — 0 critical, 2 high, 0 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -53,8 +54,10 @@ extension Application.VolumeCommand {
             for volume in volumesToPrune {
                 do {
                     let actualSize = try await ClientVolume.volumeDiskUsage(name: volume.name)
-                    totalSize += actualSize
                     try await ClientVolume.delete(name: volume.name)
+                    // Flagged #1: HIGH: `totalSize` accumulates freed space even when deletion fails
+                    // `totalSize += actualSize` is called immediately after `ClientVolume.volumeDiskUsage(name:)` and before `ClientVolume.delete(name:)`.
+                    totalSize += actualSize
                     prunedVolumes.append(volume.name)
                 } catch {
                     log.error(
@@ -71,7 +74,9 @@ extension Application.VolumeCommand {
             }
 
             let formatter = ByteCountFormatter()
-            let freed = formatter.string(fromByteCount: Int64(totalSize))
+            // Flagged #2: HIGH: `Int64(totalSize)` traps at runtime on overflow
+            // `formatter.string(fromByteCount: Int64(totalSize))` performs an unchecked narrowing conversion from `UInt64` to `Int64`. Swift's `Int64(_:)` initializer traps with a precondition failure at runtime if the value exceeds `Int64.max` (~9.2 EB).
+            let freed = formatter.string(fromByteCount: Int64(clamping: totalSize))
             print("Reclaimed \(freed) in disk space")
         }
     }

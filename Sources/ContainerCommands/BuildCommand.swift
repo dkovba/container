@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 13:33 — 0 critical, 1 high, 0 medium, 1 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -202,11 +203,9 @@ extension Application {
 
                     group.addTask {
                         try await Task.sleep(for: timeout)
-                        throw ValidationError(
-                            """
-                                Timeout waiting for connection to builder
-                            """
-                        )
+                        // Flagged #2: LOW: Timeout error message contains unwanted leading whitespace
+                        // The multiline string literal for the timeout `ValidationError` had its content indented 4 spaces beyond the closing `"""` delimiter, causing the resulting error message to contain leading whitespace ("    Timeout waiting for connection to builder" instead of "Timeout waiting for connection to builder").
+                        throw ValidationError("Timeout waiting for connection to builder")
                     }
 
                     return try await group.next()
@@ -286,7 +285,9 @@ extension Application {
 
                 let exports: [Builder.BuildExport] = try output.map { output in
                     var exp = try Builder.BuildExport(from: output)
-                    if exp.destination == nil {
+                    // Flagged #1: HIGH: Default export destination unconditionally set for all export types causes failure for tar/local exports
+                    // `exp.destination` was unconditionally set to `tempURL.appendingPathComponent("out.tar")` whenever it was nil, regardless of export type. For "tar" exports, the handler later attempts `FileManager.moveItem(at: tarURL, to: dest)` where both `tarURL` and `dest` resolve to the same path, causing a runtime error (cannot move a file onto itself). For "local" exports, output is written to a temp path that is subsequently deleted by a `defer` block, silently losing the user's build output.
+                    if exp.destination == nil && exp.type == "oci" {
                         exp.destination = tempURL.appendingPathComponent("out.tar")
                     }
                     return exp

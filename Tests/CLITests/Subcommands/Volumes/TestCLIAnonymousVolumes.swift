@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 04:19 — 0 critical, 0 high, 1 medium, 2 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -165,7 +166,9 @@ class TestCLIAnonymousVolumes: CLITest {
 
         // Get the anonymous volume ID
         let volumeNames = try getAnonymousVolumeNames()
-        #expect(volumeNames.count == 1, "should have exactly one anonymous volume")
+        // Flagged #1 (1 of 4): MEDIUM: Four tests panic on array subscript after non-throwing assertion
+        // `#expect(volumeNames.count == 1, ...)` is non-throwing — when the condition is false, Swift Testing records the failure and continues execution. The immediately following `volumeNames[0]` then triggers an index-out-of-bounds trap because the array is empty.
+        try #require(volumeNames.count == 1, "should have exactly one anonymous volume")
         let volumeID = volumeNames[0]
 
         // Stop and remove container
@@ -178,6 +181,12 @@ class TestCLIAnonymousVolumes: CLITest {
 
         // Mount same volume in new container and verify data
         let containerName2 = "\(testName)_c2"
+        // Flagged #2: LOW: `testAnonymousVolumePersistenceWithoutRm` leaks `containerName2` when the test throws
+        // `containerName2` is created mid-test with `doLongRun` but is not registered in any `defer` block. The only cleanup for it is an explicit `doStop`/`doRemoveIfExists` pair at the very end of the test body. If any throwing call between container2's creation and those final cleanup lines throws (e.g. `waitForContainerRunning`, `doExec`), Swift unwinds through the existing `defer` without stopping or removing `containerName2`. The outer `defer` then attempts to delete the anonymous volume, but that deletion silently fails because the volume is still mounted by the running `containerName2`, leaving both the container and the volume behind.
+        defer {
+            try? doStop(name: containerName2)
+            doRemoveIfExists(name: containerName2, force: true)
+        }
         try doLongRun(name: containerName2, args: ["-v", "\(volumeID):/data"], autoRemove: false)
         try waitForContainerRunning(containerName2)
 
@@ -281,7 +290,8 @@ class TestCLIAnonymousVolumes: CLITest {
 
         // Get the anonymous volume name
         let volumeNames = try getAnonymousVolumeNames()
-        #expect(volumeNames.count == 1, "should have exactly one anonymous volume")
+        // Flagged #1 (2 of 4)
+        try #require(volumeNames.count == 1, "should have exactly one anonymous volume")
 
         let volumeName = volumeNames[0]
 
@@ -310,7 +320,8 @@ class TestCLIAnonymousVolumes: CLITest {
 
         // Get the anonymous volume
         let volumeNames = try getAnonymousVolumeNames()
-        #expect(volumeNames.count == 1, "should have exactly one anonymous volume")
+        // Flagged #1 (3 of 4)
+        try #require(volumeNames.count == 1, "should have exactly one anonymous volume")
         let volumeName = volumeNames[0]
 
         // Inspect volume in JSON format
@@ -419,8 +430,14 @@ class TestCLIAnonymousVolumes: CLITest {
 
         // Get volume ID
         let volumeNames = try getAnonymousVolumeNames()
-        #expect(volumeNames.count == 1, "should have one anonymous volume")
+        // Flagged #1 (4 of 4)
+        try #require(volumeNames.count == 1, "should have one anonymous volume")
         let volumeID = volumeNames[0]
+        // Flagged #3: LOW: `testAnonymousVolumeManualDeletion` leaks `volumeID` when cleanup is skipped
+        // `volumeID` is obtained mid-test but is never registered in any `defer` block. The top-level `defer` only calls `doRemoveIfExists(name: containerName, force: true)`. If `doStop` throws (unwinding before the explicit `volume rm` call), or if the non-throwing `#expect(status == 0)` after `volume rm` records a failure and execution continues to end-of-scope, the volume is left behind with no cleanup path.
+        defer {
+            doVolumeDeleteIfExists(name: volumeID)
+        }
 
         // Stop container (unmounts volume)
         try doStop(name: containerName)

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-30 13:57 — 0 critical, 1 high, 1 medium, 1 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -61,7 +62,9 @@ class TestCLINetwork: CLITest {
             }
 
             let container = try inspectContainer(name)
-            #expect(container.networks.count > 0)
+            // Flagged #1 (1 of 2): HIGH: `#expect` before array subscript allows index-out-of-bounds crash
+            // `#expect(container.networks.count > 0)` is used immediately before `container.networks[0]` in both `testNetworkCreateAndUse` and `testIsolatedNetwork`. The `#expect` macro records a test failure but does not stop execution, so when `networks` is empty the subsequent subscript access crashes with an index-out-of-bounds error.
+            try #require(container.networks.count > 0)
             let cidrAddress = container.networks[0].ipv4Address
             let url = "http://\(cidrAddress.address):\(port)"
             var request = HTTPClientRequest(url: url)
@@ -187,7 +190,9 @@ class TestCLINetwork: CLITest {
             // delete should succeed
             _ = try run(arguments: networkDeleteArgs)
         } catch {
-            Issue.record("failed to safely delete network \(error)")
+            // Flagged #3: LOW: Wrong error message in `testNetworkLabels` catch block
+            // The `catch` block in `testNetworkLabels` calls `Issue.record("failed to safely delete network \(error)")`. This message was copy-pasted from `testNetworkDeleteWithContainer` and does not describe the actual test, which verifies network labels.
+            Issue.record("failed to verify network labels \(error)")
             return
         }
     }
@@ -232,7 +237,8 @@ class TestCLINetwork: CLITest {
             }
 
             let container = try inspectContainer(name)
-            #expect(container.networks.count > 0)
+            // Flagged #1 (2 of 2)
+            try #require(container.networks.count > 0)
             let curlImage = "docker.io/curlimages/curl:8.6.0"
             let cidrAddress = container.networks[0].ipv4Address
             let url = "http://\(cidrAddress.address):\(port)"
@@ -295,6 +301,8 @@ class TestCLINetwork: CLITest {
             Issue.record("JSON output should be an array of objects")
             return
         }
-        #expect(json.contains { ($0["id"] as? String) == name }, "JSON should contain the created network")
+        // Flagged #2: MEDIUM: `testNetworkListJSONFormat` checks `"id"` key instead of `"name"` when matching network by name
+        // `#expect(json.contains { ($0["id"] as? String) == name })` compares the network's system-generated `id` field against the human-readable name used during creation. Network IDs are typically auto-generated identifiers distinct from the user-supplied name, so this comparison will not find the created network.
+        #expect(json.contains { ($0["name"] as? String) == name }, "JSON should contain the created network")
     }
 }

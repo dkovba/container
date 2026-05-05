@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-03 00:38 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -142,7 +143,10 @@ extension Bundle {
 
     public func cloneContainerRootFs(cloning fs: Filesystem, readonly: Bool = false) throws {
         var mutableFs = fs
-        if readonly && !mutableFs.options.contains("ro") {
+        // Flagged #1: HIGH: `cloneContainerRootFs` never removes `"ro"` from mount options when `readonly` is `false`
+        // `cloneContainerRootFs(cloning:readonly:)` only conditionally appends `"ro"` to `mutableFs.options` when `readonly == true`, but never removes `"ro"` when `readonly == false`.
+        mutableFs.options.removeAll { $0 == "ro" }
+        if readonly {
             mutableFs.options.append("ro")
         }
         let cloned = try mutableFs.clone(to: self.containerRootfsBlock.absolutePath())

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-04 01:31 — 1 critical, 1 high, 0 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -23,7 +24,11 @@ public struct NxDomainResolver: DNSHandler {
     }
 
     public func answer(query: Message) async throws -> Message? {
-        let question = query.questions[0]
+        // Flagged #1: CRITICAL: `answer(query:)` crashes on empty questions array
+        // `query.questions[0]` is accessed unconditionally without checking whether the questions array is empty, causing an index-out-of-bounds trap at runtime.
+        guard let question = query.questions.first else {
+            return nil
+        }
         switch question.type {
         case ResourceRecordType.host:
             return Message(
@@ -37,7 +42,9 @@ public struct NxDomainResolver: DNSHandler {
             return Message(
                 id: query.id,
                 type: .response,
-                returnCode: .notImplemented,
+                // Flagged #2: HIGH: `answer(query:)` returns wrong response code for non-A record queries
+                // The `default` branch of the `switch question.type` statement returns `returnCode: .notImplemented` for any query type that is not `ResourceRecordType.host` (e.g. AAAA/`host6`). `HostTableResolver` explicitly returns `nil` for AAAA queries on non-existent hostnames, delegating to `NxDomainResolver` to produce the NXDOMAIN response — but the `default` branch answers those queries with `.notImplemented` instead of `.nonExistentDomain`.
+                returnCode: .nonExistentDomain,
                 questions: query.questions,
                 answers: []
             )

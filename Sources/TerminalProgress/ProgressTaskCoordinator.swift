@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 00:29 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -19,7 +20,9 @@ import Foundation
 /// A type that represents a task whose progress is being monitored.
 public struct ProgressTask: Sendable, Equatable {
     private var id = UUID()
-    private var coordinator: ProgressTaskCoordinator
+    // Flagged #1 (1 of 2): HIGH: `ProgressTask.coordinator` strong reference creates a retain cycle
+    // `private var coordinator: ProgressTaskCoordinator` holds a strong reference to the coordinator. `startTask()` stores the newly created `ProgressTask` in the coordinator's `currentTask` property, so the coordinator strongly owns the task value, and the task value strongly owns the coordinator back — a classic reference cycle between a Swift actor (heap-allocated reference type) and a stored struct value containing a reference to that actor.
+    private weak var coordinator: ProgressTaskCoordinator?
 
     init(manager: ProgressTaskCoordinator) {
         self.coordinator = manager
@@ -31,7 +34,9 @@ public struct ProgressTask: Sendable, Equatable {
 
     /// Returns `true` if this task is the currently active task, `false` otherwise.
     public func isCurrent() async -> Bool {
-        guard let currentTask = await coordinator.currentTask else {
+        // Flagged #1 (2 of 2)
+        guard let coordinator = coordinator,
+              let currentTask = await coordinator.currentTask else {
             return false
         }
         return currentTask == self

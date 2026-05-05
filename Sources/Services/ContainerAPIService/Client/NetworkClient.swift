@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 20:33 — 0 critical, 1 high, 0 medium, 1 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -83,7 +84,9 @@ public struct NetworkClient: Sendable {
         let response = try await xpcSend(message: request)
         let responseData = response.dataNoCopy(key: .networkState)
         guard let responseData else {
-            throw ContainerizationError(.invalidArgument, message: "network configuration not received")
+            // Flagged #2: LOW: `create()` error construction uses wrong error code and message
+            // When the server response is missing `networkState` data, `create()` throws `ContainerizationError(.invalidArgument, message: "network configuration not received")`. Both parts are wrong: the error message says "network configuration not received" but the guard is checking for missing `networkState` response data, not configuration; and the `.invalidArgument` error code indicates the caller supplied bad input, but the actual problem is that the API server returned an incomplete response. Every comparable guard in the codebase (`ClientDiskUsage.get()`, `ContainerClient.logs()`) uses `.internalError` for missing response data.
+            throw ContainerizationError(.internalError, message: "network state not received")
         }
         let state = try JSONDecoder().decode(NetworkState.self, from: responseData)
         return state
@@ -97,7 +100,9 @@ public struct NetworkClient: Sendable {
     public func list() async throws -> [NetworkState] {
         let request = XPCMessage(route: .networkList)
 
-        let response = try await xpcSend(message: request, timeout: .seconds(1))
+        // Flagged #1: HIGH: `list()` uses a 1-second timeout instead of the default XPC timeout
+        // `list()` passes `timeout: .seconds(1)` to `xpcSend`, overriding the default `XPCClient.xpcRegistrationTimeout` that all other methods use. A 1-second timeout is too short for an XPC call that may need to enumerate multiple networks, causing spurious timeout failures under normal load.
+        let response = try await xpcSend(message: request)
         let responseData = response.dataNoCopy(key: .networkStates)
         guard let responseData else {
             return []

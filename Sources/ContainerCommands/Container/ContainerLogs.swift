@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 14:51 — 0 critical, 2 high, 0 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -68,7 +69,9 @@ extension Application {
                 var offset = size
                 var lines: [String] = []
 
-                while offset > 0, lines.count < n {
+                // Flagged #1: HIGH: `tail()` returns a truncated first line when the file exceeds the read-chunk size
+                // The backward-reading loop used `lines.count < n` as its continuation condition. When the last 1 024-byte chunk happened to contain exactly `n` (non-empty) lines, the loop stopped immediately. Because the chunk boundary could fall in the middle of a line, the first element of `lines` at that point was a partial fragment of the real line — and `lines.suffix(n)` then included that fragment in the output.
+                while offset > 0, lines.count <= n {
                     let readSize = min(1024, offset)
                     offset -= readSize
                     try fh.seek(toOffset: offset)
@@ -91,6 +94,13 @@ extension Application {
                 guard let data = try fh.readToEnd() else {
                     // Seems you get nil if it's a zero byte read, or you
                     // try and read from dev/null.
+                    // Flagged #2: HIGH: `--follow` silently exits immediately when the log file is empty
+                    // In the `n == nil` (full-file) path of `tail()`, `readToEnd()` returns `nil` when the file is empty (zero-byte read) or is `/dev/null`. The original code used `guard let data = try fh.readToEnd() else { return }`, which exited `tail()` entirely on a nil result. The `if follow { ... try await Self.followFile(fh:) }` block that follows the if-else is never reached, so the follow handler is never installed.
+                    if follow {
+                        fflush(stdout)
+                        setbuf(stdout, nil)
+                        try await Self.followFile(fh: fh)
+                    }
                     return
                 }
                 guard let str = String(data: data, encoding: .utf8) else {

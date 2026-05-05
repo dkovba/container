@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 21:30 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 // swift-tools-version: 6.2
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
@@ -368,12 +369,13 @@ let package = Package(
                 "CVersion",
             ]
         ),
+        // Flagged #1: MEDIUM: `ContainerResourceTests` declares spurious `ContainerAPIService` dependency
+        // `"ContainerAPIService"` is listed as a dependency of `ContainerResourceTests`, but none of the six files in `Tests/ContainerResourceTests/` import `ContainerAPIService`. `ContainerAPIService` is a heavy server-side target that itself depends on `ContainerResource` (the module under test), pulling in a large transitive closure of unrelated dependencies into the test build.
         .testTarget(
             name: "ContainerResourceTests",
             dependencies: [
                 .product(name: "Containerization", package: "containerization"),
                 .product(name: "ContainerizationExtras", package: "containerization"),
-                "ContainerAPIService",
                 "ContainerResource",
             ]
         ),

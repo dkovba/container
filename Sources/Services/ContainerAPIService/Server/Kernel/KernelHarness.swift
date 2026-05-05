@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 15:04 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -38,9 +39,9 @@ public struct KernelHarness: Sendable {
 
         guard let kernelTarUrl = try message.kernelTarURL() else {
             // We have been given a path to a kernel binary on disk
-            guard let kernelFile = URL(string: kernelFilePath) else {
-                throw ContainerizationError(.invalidArgument, message: "invalid kernel file path: \(kernelFilePath)")
-            }
+            // Flagged #1: MEDIUM: `install()` constructs file URL with `URL(string:)` instead of `URL(fileURLWithPath:)`
+            // `URL(string: kernelFilePath)` is used to create a URL from a filesystem path. `URL(string:)` expects a full URL with a scheme (e.g. `http://`, `file://`) and will return `nil` for typical filesystem paths containing spaces or other characters that are invalid in unescaped URL strings. This causes valid kernel file paths to be rejected with an "invalid kernel file path" error instead of being installed.
+            let kernelFile = URL(fileURLWithPath: kernelFilePath)
             try await self.service.installKernel(kernelFile: kernelFile, platform: platform, force: force)
             return message.reply()
         }

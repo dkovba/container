@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-04 19:09 — 0 critical, 2 high, 1 medium, 0 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -109,7 +110,11 @@ public struct Builder: Sendable {
                 let winchHandler = AsyncSignalHandler.create(notify: [SIGWINCH])
                 let setWinch = { (rows: UInt16, cols: UInt16) in
                     var winch = ClientStream()
+                    // Flagged #2: HIGH: SIGWINCH terminal resize messages missing `buildID` and `command.id` — resize commands unroutable by build server
+                    // In `build()`, the `setWinch` closure constructs a `ClientStream` command message to notify the build daemon of terminal window size changes (SIGWINCH), but never sets `winch.buildID` or `winch.command.id`. Every other outbound `ClientStream` in the codebase sets both fields to the current build session ID — for example, the ACK message in `BuildStdio.handle()` explicitly sets `response.buildID = packet.buildID` and `response.command.id = packet.buildID` before yielding. The winch path omits both assignments entirely, leaving `buildID` as an empty string in the serialized protobuf message.
+                    winch.buildID = config.buildID
                     winch.command = .init()
+                    winch.command.id = config.buildID
                     if let cmdString = try TerminalCommand(rows: rows, cols: cols).json() {
                         winch.command.command = cmdString
                         continuation.yield(winch)
@@ -176,10 +181,12 @@ public struct Builder: Sendable {
             let pairs = input.components(separatedBy: ",")
             for pair in pairs {
                 let parts = pair.components(separatedBy: "=")
-                guard parts.count == 2 else { continue }
+                // Flagged #3: MEDIUM: `BuildExport.init(from:)` silently drops key-value pairs whose value contains `=`
+                // `init(from:)` parses a comma-separated export option string (e.g. `type=tar,dest=/path`) by splitting each pair on `"="` and then guarding `parts.count == 2`. Any pair whose value contains a `=` character produces more than two parts and is silently skipped by the `guard … else { continue }`. The extracted value was also taken from `parts[1]` only, so even if the guard were relaxed the remainder of the value after the second `=` would be truncated.
+                guard parts.count >= 2 else { continue }
 
                 let key = parts[0].trimmingCharacters(in: .whitespaces)
-                let value = parts[1].trimmingCharacters(in: .whitespaces)
+                let value = parts.dropFirst().joined(separator: "=").trimmingCharacters(in: .whitespaces)
 
                 switch key {
                 case "type":
@@ -217,9 +224,15 @@ public struct Builder: Sendable {
             get throws {
                 var components = ["type=\(type)"]
 
+                // Flagged #1: HIGH: `BuildExport.stringValue` drops `dest` field for `tar` and `local` exports — destination never sent to build server
+                // `stringValue` serializes a `BuildExport` into the string forwarded to the build daemon via gRPC metadata. The original `switch` grouped `"oci"`, `"tar"`, and `"local"` under a single `break`, with the comment `// ignore destination`. For `oci` this is correct (no destination is needed). For `tar` and `local` it is a bug: `init(from:)` validates that `dest` is required for both types and stores the resolved URL in `self.destination`, but `stringValue` never emitted `dest=<path>`, so the destination was always silently dropped when the metadata was built in `buildMetadata(_:)`.
                 switch type {
-                case "oci", "tar", "local":
-                    break  // ignore destination
+                case "oci":
+                    break
+                case "tar", "local":
+                    if let dest = destination {
+                        components.append("dest=\(dest.path)")
+                    }
                 default:
                     throw Builder.Error.invalidExport(rawValue, "unsupported output type")
                 }

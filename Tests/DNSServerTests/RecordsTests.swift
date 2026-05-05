@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 14:53 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -185,17 +186,20 @@ struct RecordsTests {
 
         @Test("Lowercase labels from wire format")
         func lowercaseLabelsFromWire() throws {
+            // Flagged #1: MEDIUM: `lowercaseLabelsFromWire` never exercises the uppercase-to-lowercase decoding path
+            // The test constructed the wire buffer by calling `DNSName(labels: ["EXAMPLE", "COM"])` followed by `appendBuffer`. Because `DNSName.init(labels:)` lowercases its input before storing labels, the bytes written to the buffer were already lowercase (`example`, `com`). `bindBuffer` therefore read lowercase bytes and returned lowercase labels without ever needing to perform any case folding. The assertion `parsed.labels == ["example", "com"]` passed trivially — it would have passed even if `bindBuffer` performed no lowercasing at all — so the test provided no coverage of the claimed behaviour.
             // Wire-encode "EXAMPLE.COM" with uppercase bytes, then decode
-            let upper = try DNSName(labels: ["EXAMPLE", "COM"])
-            var buffer = [UInt8](repeating: 0, count: 64)
-            let endOffset = try upper.appendBuffer(&buffer, offset: 0)
+            var buffer: [UInt8] = [
+                0x07, 0x45, 0x58, 0x41, 0x4D, 0x50, 0x4C, 0x45,  // [7]EXAMPLE
+                0x03, 0x43, 0x4F, 0x4D,  // [3]COM
+                0x00,  // null terminator
+            ]
 
             var parsed = DNSName()
             let readOffset = try parsed.bindBuffer(&buffer, offset: 0)
 
             // [7]example[3]com[0] = 8+4+1 = 13
-            #expect(endOffset == 13)
-            #expect(readOffset == endOffset)
+            #expect(readOffset == 13)
             #expect(parsed.labels == ["example", "com"])
         }
 

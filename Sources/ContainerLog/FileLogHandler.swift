@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 14:39 — 0 critical, 0 high, 0 medium, 1 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -86,7 +87,9 @@ public struct FileLogHandler: LogHandler {
         if !effectiveMetadata.isEmpty {
             text = "\(timestamp) [\(level)] \(label) \(category) \(effectiveMetadata.description): \(message)\n"
         } else {
-            text = "\(timestamp) [\(level)] \(label): \(category) \(message)\n"
+            // Flagged #1: LOW: Inconsistent log format in no-metadata branch
+            // The no-metadata format string placed the colon after `label` (`"\(label): \(category) \(message)"`) instead of after `category` before the message, making it inconsistent with the metadata branch which uses `"\(label) \(category) \(effectiveMetadata.description): \(message)"`.
+            text = "\(timestamp) [\(level)] \(label) \(category): \(message)\n"
         }
         if let data = text.data(using: .utf8) {
             fileHandle.write(data)

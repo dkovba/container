@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 15:04 — 0 critical, 0 high, 1 medium, 2 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -51,8 +52,10 @@ public struct ImagesServiceHarness: Sendable {
         let maxConcurrentDownloads = message.int64(key: .maxConcurrentDownloads)
 
         let progressUpdateService = ProgressUpdateService(message: message)
+        // Flagged #1: MEDIUM: `pull()` passes 0 for `maxConcurrentDownloads` when XPC key is missing, bypassing service default
+        // `message.int64(key:)` returns 0 when the `.maxConcurrentDownloads` key is absent from the XPC message. The original code unconditionally passed `Int(maxConcurrentDownloads)` to `service.pull()`, which meant 0 was passed explicitly, bypassing the service's default parameter value of 3. Pulling with 0 concurrent downloads would cause incorrect behavior downstream.
         let imageDescription = try await service.pull(
-            reference: ref, platform: platform, insecure: insecure, progressUpdate: progressUpdateService?.handler, maxConcurrentDownloads: Int(maxConcurrentDownloads))
+            reference: ref, platform: platform, insecure: insecure, progressUpdate: progressUpdateService?.handler, maxConcurrentDownloads: maxConcurrentDownloads > 0 ? Int(maxConcurrentDownloads) : 3)
 
         let imageData = try JSONEncoder().encode(imageDescription)
         let reply = message.reply()
@@ -136,7 +139,9 @@ public struct ImagesServiceHarness: Sendable {
         guard let data else {
             throw ContainerizationError(
                 .invalidArgument,
-                message: "missing image description"
+                // Flagged #2: LOW: Wrong error message in `save()` says singular "description" for plural key
+                // The guard on missing `.imageDescriptions` data threw an error with message `"missing image description"` (singular), but the function reads the `.imageDescriptions` key and decodes an `[ImageDescription]` array. The error message was copy-pasted from a single-description guard elsewhere in the file.
+                message: "missing image descriptions"
             )
         }
         let imageDescriptions = try JSONDecoder().decode([ImageDescription].self, from: data)
@@ -222,7 +227,9 @@ extension ImagesServiceHarness {
         guard let descriptionData else {
             throw ContainerizationError(
                 .invalidArgument,
-                message: "missing Image description"
+                // Flagged #3: LOW: Inconsistent capitalization in `unpack()` error message
+                // The error message `"missing Image description"` used a capital "I" in "Image", while every other error message in the file uses lowercase (e.g., `"missing image reference"`, `"missing image description"`).
+                message: "missing image description"
             )
         }
         let description = try JSONDecoder().decode(ImageDescription.self, from: descriptionData)

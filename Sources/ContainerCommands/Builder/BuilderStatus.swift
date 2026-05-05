@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 05:45 — 0 critical, 0 high, 0 medium, 1 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -60,8 +61,10 @@ extension Application {
                 if let czError = error as? ContainerizationError, czError.code == .notFound {
                     if !quiet {
                         print("builder is not running")
-                        return
                     }
+                    // Flagged #1: LOW: `notFound` error is re-thrown when `--quiet` is set
+                    // The `return` statement that exits cleanly on a `.notFound` error was placed inside the `if !quiet` branch, so it was only reached when `quiet` was `false`. When `quiet` was `true` the branch was skipped entirely and execution fell through to `throw error`, re-throwing the "not found" error to the caller.
+                    return
                 }
                 throw error
             }

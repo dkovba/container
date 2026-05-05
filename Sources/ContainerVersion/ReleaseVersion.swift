@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-06 13:34 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -41,6 +42,9 @@ public struct ReleaseVersion {
     }
 
     public static func gitCommit() -> String? {
-        get_git_commit().map { String(cString: $0) }
+        // Flagged #1: MEDIUM: `gitCommit()` never returns nil, causing truncated sentinel in version output
+        // `get_git_commit()` returns a C string literal via a non-nullable pointer (the `GIT_COMMIT` macro defaults to `"unspecified"`). The original `.map { String(cString: $0) }` always produces a non-nil `String?`, so `gitCommit()` never returns `nil`. Callers apply `prefix(7)` truncation expecting a real hash, which mangles `"unspecified"` into `"unspeci"` in the version output string.
+        let value = get_git_commit().map { String(cString: $0) }
+        return value == "unspecified" ? nil : value
     }
 }

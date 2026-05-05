@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 06:20 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -98,6 +99,9 @@ struct AttachmentAllocatorTest {
         let address2 = try await allocator.allocate(hostname: "test-host")
 
         // After deallocation, allocating the same hostname should give a new address
+        // Flagged #1: MEDIUM: `testReallocateAfterDeallocation` did not assert that the reallocated address differs from the original
+        // `testReallocateAfterDeallocation` allocates a hostname, deallocates it, then reallocates the same hostname and checks only that the new address falls within the valid range `[100, 110)`. Because the original address (100) is itself within that range, an allocator that returned the same address on every reallocation would still pass the test. The test comment explicitly states "allocating the same hostname should give a new address", but no assertion enforced this invariant.
+        #expect(address2 != address1)
         #expect(address2 >= 100)
         #expect(address2 < 110)
     }

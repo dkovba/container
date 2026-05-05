@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 22:52 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -31,7 +32,9 @@ extension Application.VolumeCommand {
         @Option(name: .customLong("opt"), help: "Set driver specific options")
         var driverOpts: [String] = []
 
-        @Option(name: .short, help: "Size of the volume in bytes, with optional K, M, G, T, or P suffix")
+        // Flagged #1: MEDIUM: `--size` flag is inaccessible; only `-s` short form works
+        // `@Option(name: .short, ...)` registers only the single-character flag `-s` for the `size` option. The long form `--size` is never registered, so any invocation using `--size <value>` fails with an unrecognized-option error. The `run()` method's own comment reads `// If --size is specified`, confirming that `--size` was the intended interface.
+        @Option(name: .shortAndLong, help: "Size of the volume in bytes, with optional K, M, G, T, or P suffix")
         var size: String?
 
         @OptionGroup

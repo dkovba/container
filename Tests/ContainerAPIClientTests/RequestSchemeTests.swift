@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 03:41 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -53,6 +54,9 @@ struct RequestSchemeTests {
         #expect(try requestScheme.schemeFor(host: arg.host) == arg.expected)
     }
 
+    // Flagged #1: HIGH: `testEmptyHostThrowsError` never executed due to missing `@Test` attribute
+    // `testEmptyHostThrowsError` is declared as a plain instance method with no `@Test` attribute. Swift Testing only discovers and runs functions marked with `@Test`; without it, the function is silently ignored and the error-throwing behavior of `RequestScheme.schemeFor(host:)` for an empty host is never verified.
+    @Test
     func testEmptyHostThrowsError() throws {
         #expect(throws: (any Error).self) {
             let requestScheme = RequestScheme(rawValue: "https")!

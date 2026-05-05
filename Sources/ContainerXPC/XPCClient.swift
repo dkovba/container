@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-06 13:41 — 0 critical, 0 high, 0 medium, 1 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -77,8 +78,10 @@ extension XPCClient {
                 group.addTask {
                     try await Task.sleep(for: responseTimeout)
                     let route = message.string(key: XPCMessage.routeKey) ?? "nil"
+                    // Flagged #1: LOW: `send()` throws wrong error code on timeout
+                    // The timeout handler throws `ContainerizationError(.internalError, ...)` instead of using the dedicated `.timeout` error code, causing callers that match on error codes to misidentify a timeout as a generic internal error.
                     throw ContainerizationError(
-                        .internalError,
+                        .timeout,
                         message: "XPC timeout for request to \(self.service)/\(route)"
                     )
                 }

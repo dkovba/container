@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 21:49 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -41,7 +42,9 @@ class TestCLIExportCommand: CLITest {
 
         let symlinkMustRemain = "symlink-must-remain"
         _ = try doExec(name: name, cmd: ["sh", "-c", "echo \(symlinkMustRemain) > /parent/child/baz"])
-        _ = try doExec(name: name, cmd: ["sh", "-c", "ln /parent/child/baz /baz"])
+        // Flagged #1: MEDIUM: `ln` creates hardlink instead of symlink in `testExportCommand`
+        // The shell command `ln /parent/child/baz /baz` creates a hardlink, but the test intent is to create a symlink (the variable is named `symlinkMustRemain` and this block is separate from the hardlink test above it). Without `-s`, both the hardlink and symlink test blocks create hardlinks, so the test never validates symlink preservation in an exported container image.
+        _ = try doExec(name: name, cmd: ["sh", "-c", "ln -s /parent/child/baz /baz"])
 
         try doStop(name: name)
 

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 13:22 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -134,6 +135,9 @@ struct RegistryResourceTests {
         #expect(!RegistryResource.nameValid(""), "empty string should be invalid")
         #expect(!RegistryResource.nameValid("-invalid.com"), "hostname starting with hyphen should be invalid")
         #expect(!RegistryResource.nameValid("invalid-.com"), "hostname ending with hyphen should be invalid")
+        // Flagged #1: MEDIUM: `testRegistryResourceNameValidation` missing coverage for hostnames with a trailing newline
+        // `RegistryResource.nameValid(_:)` was patched to use the `\z` anchor instead of `$` specifically because ICU's `$` matches immediately before a terminal `\n`, causing `"docker.io\n"` to be accepted as a valid hostname. The test suite contained no assertion for this input, leaving the fix without any regression coverage.
+        #expect(!RegistryResource.nameValid("docker.io\n"), "hostname with trailing newline should be invalid")
     }
 
     @Test("RegistryResource can have labels")

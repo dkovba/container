@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 11:09 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -115,13 +116,17 @@ extension ImageTransfer {
     fileprivate init(id: String, digest: String, ref: String, platform: String, data: Data) throws {
         self.init()
         self.id = id
-        self.tag = digest
+        // Flagged #1 (1 of 2): MEDIUM: `ImageTransfer.tag` set to digest instead of image reference
+        // `self.tag = digest` assigns the content-addressable digest to the `tag` field, which semantically represents the image reference (e.g., "ubuntu:22.04"). Consumers reading `.tag` expecting an image reference receive a digest string instead.
+        self.tag = ref
         self.metadata = [
             "os": "linux",
             "stage": "resolver",
             "method": "/resolve",
             "ref": ref,
             "platform": platform,
+            // Flagged #1 (2 of 2)
+            "digest": digest,
         ]
         self.complete = true
         self.direction = .into

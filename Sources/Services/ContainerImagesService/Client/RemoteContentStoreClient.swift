@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 22:23 — 1 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -129,7 +130,9 @@ public struct RemoteContentStoreClient: ContentStore {
 
         let response = try await client.send(request)
         guard let data = response.dataNoCopy(key: .digests) else {
-            throw ContainerizationError.init(.internalError, message: "failed to delete digests")
+            // Flagged #1: LOW: Wrong error message in completeIngestSession
+            // Copy-pasted from `delete` — says "failed to delete digests" instead of describing ingest completion
+            throw ContainerizationError.init(.internalError, message: "failed to complete ingest session")
         }
 
         let decoder = JSONDecoder()

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 13:04 — 1 critical, 1 high, 0 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -46,6 +47,23 @@ struct PublishPortTests {
             PublishPort(hostAddress: try IPAddress("0.0.0.0"), hostPort: 8080, containerPort: 8080, proto: .udp, count: 1),
             PublishPort(hostAddress: try IPAddress("0.0.0.0"), hostPort: 1024, containerPort: 1024, proto: .tcp, count: 1025),
             PublishPort(hostAddress: try IPAddress("0.0.0.0"), hostPort: 1024, containerPort: 1024, proto: .udp, count: 1025),
+        ]
+        #expect(!ports.hasOverlaps())
+    }
+
+    @Test
+    func testPublishPortsSamePortDifferentHostAddresses() throws {
+        let ports = [
+            PublishPort(hostAddress: try IPAddress("127.0.0.1"), hostPort: 8080, containerPort: 8080, proto: .tcp, count: 1),
+            PublishPort(hostAddress: try IPAddress("0.0.0.0"), hostPort: 8080, containerPort: 8080, proto: .tcp, count: 1),
+        ]
+        #expect(!ports.hasOverlaps())
+    }
+
+    @Test
+    func testPublishPortsHighPortRangeNoOverflow() throws {
+        let ports = [
+            PublishPort(hostAddress: try IPAddress("0.0.0.0"), hostPort: 65000, containerPort: 8080, proto: .tcp, count: 536),
         ]
         #expect(!ports.hasOverlaps())
     }

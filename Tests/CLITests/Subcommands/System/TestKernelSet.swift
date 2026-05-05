@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 03:52 — 0 critical, 0 high, 2 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -67,6 +68,9 @@ class TestCLIKernelSet: CLITest {
         try doLongRun(name: name, args: [])
         defer { try? doStop(name: name) }
 
+        // Flagged #1: MEDIUM: `validateContainerRun()` races against container startup before exec
+        // `doLongRun` starts the container in detached mode and returns before the container reaches the running state. The original code called `doExec` immediately after `doLongRun` with no intervening readiness check, so the exec could arrive before the container process was ready to accept commands.
+        try waitForContainerRunning(name)
         _ = try doExec(name: name, cmd: ["date"])
         try doStop(name: name)
     }
@@ -116,7 +120,9 @@ class TestCLIKernelSet: CLITest {
             try await ContainerAPIClient.FileDownloader.downloadFile(url: remoteTar, to: localTarPath)
 
             // extract just the file we want
-            let targetPath = tempDir.appending(path: URL(string: defaultBinaryPath)!.lastPathComponent)
+            // Flagged #2: MEDIUM: `fromLocalDisk()` uses `URL(string:)` with a force-unwrap for a file path
+            // `URL(string: defaultBinaryPath)!.lastPathComponent` uses the URL string initializer, which is intended for fully-formed URL strings with a scheme. Applied to a bare file-system path it can return `nil` (e.g. if the path contains characters that are not valid in a URL without percent-encoding), causing a force-unwrap trap at runtime. Every other use of `defaultBinaryPath` in the file correctly uses `URL(filePath:)`.
+            let targetPath = tempDir.appending(path: URL(filePath: defaultBinaryPath).lastPathComponent)
             let archiveReader = try ArchiveReader(file: localTarPath)
             let (_, data) = try archiveReader.extractFile(path: defaultBinaryPath)
             try data.write(to: targetPath, options: .atomic)

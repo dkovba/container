@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 23:58 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -49,7 +50,9 @@ extension ManagedResource {
     public static func generateId() -> String {
         (0..<2)
             .map { _ in UInt128.random(in: 0...UInt128.max) }
-            .map { String($0, radix: 16).padding(toLength: 32, withPad: "0", startingAt: 0) }
+            // Flagged #1: HIGH: `generateId()` produces corrupt IDs via trailing-zero padding
+            // `String($0, radix: 16).padding(toLength: 32, withPad: "0", startingAt: 0)` appends zeros to the right of the hex string. When the random `UInt128` value has a leading zero nibble (e.g. the value is `0x0FFFF...`), the hex string is shorter than 32 characters and trailing zeros are appended, producing a string that represents a numerically different 128-bit value. The two halves of the ID are therefore not uniform random draws from the full 128-bit space, and distinct random values can map to the same padded string.
+            .map { String(repeating: "0", count: 32 - String($0, radix: 16).count) + String($0, radix: 16) }
             .joined()
     }
 }

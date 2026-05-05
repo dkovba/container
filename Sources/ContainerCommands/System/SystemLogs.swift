@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 21:31 — 0 critical, 0 high, 0 medium, 2 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -73,9 +74,13 @@ extension Application {
                 try process.run()
                 process.waitUntilExit()
             } catch {
+                // Flagged #1: LOW: Wrong error code wraps process launch failure as a user argument error
+                // `ContainerizationError(.invalidArgument, ...)` is thrown when `process.run()` fails to launch `/usr/bin/env log`. `.invalidArgument` signals that the caller supplied a bad argument, but a failure to exec the `log` binary is a system-level condition entirely outside the caller's control.
                 throw ContainerizationError(
-                    .invalidArgument,
-                    message: "failed to system logs: \(error)"
+                    .internalError,
+                    // Flagged #2: LOW: Garbled error message omits the verb "fetch"
+                    // The error message reads `"failed to system logs: \(error)"`, which is grammatically broken — the verb is missing, making the message unparseable to users and log consumers.
+                    message: "failed to fetch system logs: \(error)"
                 )
             }
             throw ArgumentParser.ExitCode(process.terminationStatus)

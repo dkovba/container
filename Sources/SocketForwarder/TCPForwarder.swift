@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-06 16:43 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -45,7 +46,9 @@ public struct TCPForwarder: SocketForwarder {
 
         let bootstrap = ServerBootstrap(group: self.eventLoopGroup)
             .serverChannelOption(ChannelOptions.socket(.init(SOL_SOCKET), .init(SO_REUSEADDR)), value: 1)
-            .childChannelOption(ChannelOptions.socket(.init(SOL_SOCKET), .init(SO_REUSEADDR)), value: 1)
+            // Flagged #1: HIGH: `childChannelOption` sets `SO_REUSEADDR` instead of enabling half-closure support
+            // The child channel option was set to `SO_REUSEADDR`, which is meaningless on accepted sockets. The required option is `allowRemoteHalfClosure`, without which NIO closes the entire channel upon receiving a FIN rather than firing a `ChannelEvent.inputClosed` user event. This renders `GlueHandler.userInboundEventTriggered`'s half-closure forwarding logic unreachable.
+            .childChannelOption(ChannelOptions.allowRemoteHalfClosure, value: true)
             .childChannelInitializer { channel in
                 channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.addHandler(

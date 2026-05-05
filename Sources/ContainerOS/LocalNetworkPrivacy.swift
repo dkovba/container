@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 15:10 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -41,7 +42,9 @@ package struct LocalNetworkPrivacy {
         let addresses = selectedLinkLocalIPv6Addresses()
         for address in addresses {
             let sock6 = socket(AF_INET6, SOCK_DGRAM, 0)
-            guard sock6 >= 0 else { return }
+            // Flagged #1: MEDIUM: `triggerLocalNetworkPrivacyAlert()` aborts early on transient socket failure
+            // The `guard sock6 >= 0 else { return }` statement exits the entire function when a single `socket()` call fails, preventing all remaining addresses from being attempted.
+            guard sock6 >= 0 else { continue }
             defer { close(sock6) }
 
             withUnsafePointer(to: address) { sa6 in

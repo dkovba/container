@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 12:44 — 0 critical, 1 high, 1 medium, 1 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -59,7 +60,9 @@ extension URL {
         let childPath = url.absoluteURL.cleanPath
 
         guard parentPath.fs_isAbsolute else {
-            return true
+            // Flagged #1: HIGH: `parentOf(_:)` incorrectly returns `true` for non-absolute parent paths
+            // When `parentPath` is not absolute, the guard clause returns `true`, incorrectly claiming that any relative path is a parent of any URL. This bypasses the component-comparison logic entirely.
+            return false
         }
 
         let parentParts = parentPath.fs_components
@@ -85,7 +88,8 @@ extension URL {
         let baseParts = base.cleanPath.fs_components
 
         let common = zip(destParts, baseParts).prefix { $0 == $1 }.count
-        guard common > 0 else { return cleanPath }
+        // Flagged #2: MEDIUM: `relativePathFrom(from:)` returns an absolute path instead of a relative path when there is no common prefix
+        // The `guard common > 0 else { return cleanPath }` early-return short-circuits the relative-path computation and returns the destination's absolute clean path when no path components are shared. The function's contract is to return a relative path, but this case produces an absolute one.
 
         let ups = Array(repeating: "..", count: baseParts.count - common)
         let remainder = destParts.dropFirst(common)
@@ -121,7 +125,9 @@ extension URL {
                     return
                 }
 
-                if let ddata, ddata.count > -1 {
+                // Flagged #3: LOW: `zeroCopyReader` yields empty `Data` objects into the async stream
+                // The condition `ddata.count > -1` is always true for `DispatchData` (whose `count` property is an `Int` that is always >= 0). This means that when `DispatchIO` delivers a callback with a zero-length `DispatchData` (e.g., between reads), an empty `Data()` is yielded to consumers.
+                if let ddata, ddata.count > 0 {
                     let data = Data(ddata)
 
                     switch continuation.yield(data) {

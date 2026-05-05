@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 16:34 — 0 critical, 0 high, 0 medium, 1 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -75,7 +76,9 @@ public final class ReservedVmnetNetwork: Network {
     public func start() async throws {
         try stateMutex.withLock { state in
             guard case .created(let configuration) = state.networkState else {
-                throw ContainerizationError(.invalidArgument, message: "cannot start network that is in \(state.networkState.state) state")
+                // Flagged #1: LOW: `start()` throws wrong error code for invalid state
+                // When `start()` is called on a network not in the `.created` state, the error uses `.invalidArgument` instead of `.invalidState`. The network's current state is the problem, not a caller-supplied argument. Both `AllocationOnlyVmnetNetwork.start()` and `NetworkService.init` use `.invalidState` for equivalent state guards.
+                throw ContainerizationError(.invalidState, message: "cannot start network that is in \(state.networkState.state) state")
             }
 
             let networkInfo = try startNetwork(configuration: configuration, log: log)

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 18:55 — 0 critical, 0 high, 9 medium, 1 low (10 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -204,6 +205,13 @@ public actor SandboxService {
 
             let stdio = message.stdio()
             let containerLog = try FileHandle(forWritingTo: bundle.containerLog)
+            // Flagged #4 (1 of 3): MEDIUM: `bootstrap()` stdout and stderr `MultiWriter`s do not each safely own an independent container-log file descriptor
+            // In `bootstrap()`, `stderrContainerLog` must be a separate file descriptor from `containerLog` so that closing both `MultiWriter`s is safe, yet the two descriptors must share the same underlying kernel file description so their file offsets stay in sync. Sharing a single `FileHandle` between both `MultiWriter`s causes a double-close: the init-process exit handler calls `io.out.close()` then `io.err.close()`, and the second close acts on an already-closed (or recycled) descriptor. Opening a second, independent `FileHandle(forWritingTo:)` avoids the double-close but creates a separate file description with its own offset starting at 0, so stderr writes overwrite the beginning of stdout's data and vice-versa, corrupting the container log.
+            let stderrFd = dup(containerLog.fileDescriptor)
+            guard stderrFd >= 0 else {
+                throw POSIXError(.init(rawValue: errno)!)
+            }
+            let stderrContainerLog = FileHandle(fileDescriptor: stderrFd, closeOnDealloc: true)
             let stdout = {
                 if let h = stdio[1] {
                     return MultiWriter(handles: [h, containerLog])
@@ -213,10 +221,12 @@ public actor SandboxService {
 
             let stderr: MultiWriter? = {
                 if !config.initProcess.terminal {
+                    // Flagged #4 (2 of 3)
                     if let h = stdio[2] {
-                        return MultiWriter(handles: [h, containerLog])
+                        return MultiWriter(handles: [h, stderrContainerLog])
                     }
-                    return MultiWriter(handles: [containerLog])
+                    // Flagged #4 (3 of 3)
+                    return MultiWriter(handles: [stderrContainerLog])
                 }
                 return nil
             }()
@@ -269,10 +279,12 @@ public actor SandboxService {
             } catch {
                 do {
                     try await self.cleanUpContainer(containerInfo: ctrInfo)
-                    await self.setState(.stopped)
                 } catch {
                     self.log.error("failed to clean up container", metadata: ["error": "\(error)"])
                 }
+                // Flagged #6: MEDIUM: `bootstrap()` error handler skips `setState(.stopped)` when cleanup throws, leaving state permanently wedged as `.created`
+                // In `bootstrap()`, the error-recovery block places `await self.setState(.stopped)` inside the inner `do` after `cleanUpContainer`. If `cleanUpContainer` throws, the inner `catch` logs the error but execution skips `setState(.stopped)` and jumps straight to `throw error`. The sandbox state remains `.created`, which passes the `guard await self.state == .created` check on a subsequent `bootstrap()` call while the partially-initialized container (VM, waiters, exit monitor registration) from the first attempt is still referenced by `self.container`.
+                await self.setState(.stopped)
                 throw error
             }
             return message.reply()
@@ -490,14 +502,24 @@ public actor SandboxService {
         return try await self.lock.withLock { _ in
             switch await self.state {
             case .running, .booted:
-                await self.setState(.stopping)
-
+                // Flagged #3: MEDIUM: `stop()` transitions to `.stopping` before validating input, permanently wedging state on parse failure
+                // `stop()` calls `await self.setState(.stopping)` before `message.stopOptions()`. If `stopOptions()` throws (e.g., missing or malformed stop-options data in the XPC message), the error propagates out while the state remains `.stopping`. The `stop()` method only matches `.running` and `.booted`, so no subsequent `stop()` call can ever succeed, and the container can never be stopped or its resources cleaned up.
                 let ctr = try await self.getContainer()
                 let stopOptions = try message.stopOptions()
-                let exitStatus = try await self.gracefulStopContainer(
-                    ctr.container,
-                    stopOpts: stopOptions
-                )
+
+                await self.setState(.stopping)
+
+                // Flagged #9: MEDIUM: `stop()` permanently wedges state as `.stopping` when `gracefulStopContainer` throws
+                // In `stop()`, after `setState(.stopping)`, the call `try await self.gracefulStopContainer(...)` is not wrapped in error handling. `gracefulStopContainer` can throw from its internal `lc.stop()` call (which powers off the VM). When it does, the error propagates out of the `.running, .booted` switch case, skipping both `cleanUpContainer` and `setState(.stopped)`. The state remains permanently `.stopping`. The `stop()` method only matches `.running` and `.booted`, so no subsequent `stop()` call can recover the state, and the container's resources are never cleaned up.
+                var exitStatus = ExitStatus(exitCode: 255)
+                do {
+                    exitStatus = try await self.gracefulStopContainer(
+                        ctr.container,
+                        stopOpts: stopOptions
+                    )
+                } catch {
+                    self.log.error("failed to gracefully stop container", metadata: ["error": "\(error)"])
+                }
 
                 do {
                     if case .stopped = await self.state {
@@ -533,6 +555,15 @@ public actor SandboxService {
             case .running:
                 let ctr = try await getContainer()
                 let id = try message.id()
+                // Flagged #7 (1 of 3): MEDIUM: `kill()` crashes on signal values exceeding `Int32.max`
+                // `kill()` reads the signal as `Int64` via `message.signal()` and converts it with `Int32(try message.signal())`. There is no upper-bound or lower-bound validation. If a client supplies a value outside the `Int32` range (e.g., greater than 2147483647 or less than 0), the `Int32()` initializer traps at runtime, crashing the sandbox service process.
+                let signalValue = try message.signal()
+                guard signalValue >= 0, signalValue <= Int64(Int32.max) else {
+                    throw ContainerizationError(
+                        .invalidArgument,
+                        message: "signal value out of range"
+                    )
+                }
                 if id != ctr.container.id {
                     guard let processInfo = await self.processes[id] else {
                         throw ContainerizationError(.invalidState, message: "process \(id) does not exist")
@@ -541,12 +572,14 @@ public actor SandboxService {
                     guard let proc = processInfo.process else {
                         throw ContainerizationError(.invalidState, message: "process \(id) not started")
                     }
-                    try await proc.kill(Int32(try message.signal()))
+                    // Flagged #7 (2 of 3)
+                    try await proc.kill(Int32(signalValue))
                     return message.reply()
                 }
 
                 // TODO: fix underlying signal value to int64
-                try await ctr.container.kill(Int32(try message.signal()))
+                // Flagged #7 (3 of 3)
+                try await ctr.container.kill(Int32(signalValue))
                 return message.reply()
             default:
                 throw ContainerizationError(
@@ -577,6 +610,14 @@ public actor SandboxService {
             let ctr = try getContainer()
             let width = message.uint64(key: SandboxKeys.width.rawValue)
             let height = message.uint64(key: SandboxKeys.height.rawValue)
+            // Flagged #8: MEDIUM: `resize()` crashes on terminal dimension values exceeding `UInt16.max`
+            // `resize()` reads `width` and `height` as `UInt64` from the XPC message and converts them with `UInt16(width)` and `UInt16(height)`. There is no range validation. If a client supplies a value greater than `UInt16.max` (65535), the `UInt16()` initializer traps at runtime, crashing the sandbox service process.
+            guard width <= UInt64(UInt16.max), height <= UInt64(UInt16.max) else {
+                throw ContainerizationError(
+                    .invalidArgument,
+                    message: "terminal dimensions out of range"
+                )
+            }
 
             if id != ctr.container.id {
                 guard let processInfo = self.processes[id] else {
@@ -657,7 +698,9 @@ public actor SandboxService {
         switch self.state {
         case .running, .booted:
             let port = message.uint64(key: SandboxKeys.port.rawValue)
-            guard port > 0 else {
+            // Flagged #5: MEDIUM: `dial()` crashes on vsock port values exceeding `UInt32.max`
+            // `dial()` reads the port as `UInt64` from the XPC message and converts it with `UInt32(port)`. The existing guard only validates `port > 0`. If a client supplies a value greater than `UInt32.max` (4294967295), the `UInt32()` initializer traps at runtime, crashing the sandbox service process.
+            guard port > 0, port <= UInt64(UInt32.max) else {
                 throw ContainerizationError(
                     .invalidArgument,
                     message: "no vsock port supplied for dial"
@@ -732,11 +775,14 @@ public actor SandboxService {
 
         let waitFunc: ExitMonitor.WaitHandler = {
             let code = try await process.wait()
+            // Flagged #2 (1 of 2): MEDIUM: `startExecProcess` closes raw fd instead of `FileHandle`, causing double-close
+            // The exec-process exit handler calls `self.closeHandle(out.fileDescriptor)` (and the same for stderr), which performs a raw `Darwin.close()` on the file descriptor extracted from a `FileHandle`. This bypasses `FileHandle`'s internal bookkeeping, so the `FileHandle` still considers itself open. When the `FileHandle` is later deallocated, its `deinit` calls `close()` again on the same fd number, which may have already been recycled by the OS for an unrelated file.
             if let out = processInfo.io[1] {
-                try self.closeHandle(out.fileDescriptor)
+                try out.close()
             }
+            // Flagged #2 (2 of 2)
             if let err = processInfo.io[2] {
-                try self.closeHandle(err.fileDescriptor)
+                try err.close()
             }
             return code
         }
@@ -1224,8 +1270,12 @@ extension ContainerResource.Bundle {
     func createLogFile() throws {
         // Create the log file we'll write stdio to.
         // O_TRUNC resolves a log delay issue on restarted containers by force-updating internal state
-        let fd = Darwin.open(self.containerLog.path, O_CREAT | O_RDONLY | O_TRUNC, 0o644)
-        guard fd > 0 else {
+        // Flagged #1: MEDIUM: `createLogFile()` uses `O_RDONLY` with `O_TRUNC`, which is undefined behavior
+        // `Darwin.open()` is called with `O_CREAT | O_RDONLY | O_TRUNC`. Combining `O_TRUNC` with `O_RDONLY` is undefined behavior per POSIX. The file may not actually be truncated depending on the platform and kernel version, causing stale log data to persist across container restarts.
+        let fd = Darwin.open(self.containerLog.path, O_CREAT | O_WRONLY | O_TRUNC, 0o644)
+        // Flagged #10: LOW: `createLogFile()` rejects valid file descriptor 0
+        // `guard fd > 0` treats file descriptor 0 as a failure. `open()` returns -1 on error; any non-negative value including 0 is a valid file descriptor.
+        guard fd >= 0 else {
             throw POSIXError(.init(rawValue: errno)!)
         }
         close(fd)

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-04 00:52 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -14,6 +15,10 @@
 // limitations under the License.
 //===----------------------------------------------------------------------===//
 
+// Flagged #1 (1 of 2): HIGH: `Version.h` missing include guard causes multiple-inclusion errors
+// The header had no include guard (`#ifndef`/`#define`/`#endif` wrapper). Any translation unit that includes `Version.h` more than once — directly or transitively — would reprocess all macro definitions and function declarations on every inclusion, producing redefinition diagnostics and potentially violating the one-definition rule in C++.
+#ifndef VERSION_H
+#define VERSION_H
 #ifndef CZ_VERSION
 #define CZ_VERSION "latest"
 #endif
@@ -37,3 +42,5 @@ const char* get_release_version();
 const char* get_swift_containerization_version();
 
 const char* get_container_builder_shim_version();
+// Flagged #1 (2 of 2)
+#endif

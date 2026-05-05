@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 23:13 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -42,11 +43,9 @@ extension Application.VolumeCommand {
                 volumes.append(volume)
             }
 
-            let options = JSONOptions(
-                outputFormatting: [.prettyPrinted, .sortedKeys],
-                dateEncodingStrategy: .iso8601
-            )
-            try Output.emit(Output.renderJSON(volumes, options: options))
+            // Flagged #1: MEDIUM: `VolumeInspect.run()` encodes dates in ISO 8601 format, inconsistent with the rest of the volume subsystem
+            // `JSONOptions` was constructed with `dateEncodingStrategy: .iso8601`, causing `volume inspect` to emit dates as ISO 8601 strings (e.g. `"2024-01-15T12:00:00Z"`) while every other volume command — including `volume list --format json` — emits dates as Unix timestamps via the default `.deferredToDate` strategy. The server also serializes `Volume` objects with a plain `JSONEncoder()` (default strategy), so the inspect output was the only path in the entire volume subsystem using a different date representation.
+            try Output.emit(Output.renderJSON(volumes, options: .prettySorted))
         }
     }
 }

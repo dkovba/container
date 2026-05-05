@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 15:31 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -221,7 +222,9 @@ extension DefaultsStore.Keys {
         case .defaultKernelURL:
             return "https://github.com/kata-containers/kata-containers/releases/download/3.28.0/kata-static-3.28.0-arm64.tar.zst"
         case .defaultSubnet:
-            return "192.168.64.1/24"
+            // Flagged #1: MEDIUM: Default subnet CIDR uses host address instead of network address
+            // `defaultSubnet` returned `"192.168.64.1/24"`, which specifies a host address (`.1`) rather than the network address (`.0`). `CIDRv4` stores the literal address in its `address` property and `description` returns the non-canonical form, causing incorrect subnet identification in log output and serialization.
+            return "192.168.64.0/24"
         case .defaultIPv6Subnet:
             return "fd00::/64"
         case .defaultRegistryDomain:

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 14:44 — 0 critical, 0 high, 0 medium, 1 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -93,9 +94,12 @@ extension Logger.Level {
             return .debug
         case .info:
             return .info
-        case .notice, .warning:
+        // Flagged #1 (1 of 2): LOW: `.warning` log level mapped to wrong OSLogType severity
+        // `.warning` was grouped with `.notice` in the `toOSLogLevel()` switch, causing both to return `.default`. This breaks the severity ordering since warning is more severe than notice but was emitted at the same OS log level, making it impossible to filter warnings from notices using OS log facilities.
+        case .notice:
             return .default
-        case .error:
+        // Flagged #1 (2 of 2)
+        case .warning, .error:
             return .error
         case .critical:
             return .fault

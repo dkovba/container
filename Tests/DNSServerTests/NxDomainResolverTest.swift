@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 14:19 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -31,7 +32,9 @@ struct NxDomainResolverTest {
 
         let response = try await handler.answer(query: query)
 
-        #expect(.notImplemented == response?.returnCode)
+        // Flagged #1: HIGH: `testUnsupportedQuestionType` asserts the wrong return code for non-A queries
+        // The test expected `.notImplemented` as the return code when `NxDomainResolver` handles a non-A query (e.g. AAAA/`host6`). `NxDomainResolver` is a catch-all fallback resolver whose contract is to return NXDOMAIN for every query that reaches it, regardless of record type. The production implementation's `default` branch was returning `.notImplemented` (a bug in the source), and this test was written to match that buggy behavior rather than the correct behavior.
+        #expect(.nonExistentDomain == response?.returnCode)
         #expect(1 == response?.id)
         #expect(.response == response?.type)
         #expect(1 == response?.questions.count)

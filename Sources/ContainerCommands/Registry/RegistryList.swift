@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 20:47 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -59,16 +60,19 @@ private struct PrintableRegistry: ListDisplayable {
         self.registry = registry
     }
 
+    // Flagged #1 (1 of 2): MEDIUM: `tableHeader` and `tableRow` have CREATED/MODIFIED columns swapped
+    // `tableHeader` declared the date columns in the order `["HOSTNAME", "USERNAME", "MODIFIED", "CREATED"]`, while `tableRow` emitted values in the corresponding order `modificationDate`, `creationDate`. The two were internally consistent but both in the wrong order: by convention (and in line with all other resource list commands in this codebase) the creation date must appear before the modification date.
     static var tableHeader: [String] {
-        ["HOSTNAME", "USERNAME", "MODIFIED", "CREATED"]
+        ["HOSTNAME", "USERNAME", "CREATED", "MODIFIED"]
     }
 
     var tableRow: [String] {
         [
             registry.name,
             registry.username,
-            registry.modificationDate.ISO8601Format(),
+            // Flagged #1 (2 of 2)
             registry.creationDate.ISO8601Format(),
+            registry.modificationDate.ISO8601Format(),
         ]
     }
 

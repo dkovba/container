@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 12:30 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -66,7 +67,11 @@ public class Globber {
         }
 
         if try glob(input.lastPathComponent, head) {
-            try self.match(input: input, components: tail)
+            // Flagged #1: MEDIUM: Unconditional recursive call causes false positive glob matches
+            // `self.match(input: input, components: tail)` was called unconditionally after `head` matched `input.lastPathComponent`. When `tail` is non-empty and does not start with `"**"`, this re-matches `tail[0]` against the same `input.lastPathComponent`, producing spurious results whenever consecutive pattern components happen to match the same directory name (e.g., pattern `"a/a"` incorrectly matches directory `"a"` itself).
+            if tail.isEmpty || tail.first == "**" {
+                try self.match(input: input, components: tail)
+            }
 
             for child in input.children where try glob(child.lastPathComponent, tail.first ?? "") {
                 try self.match(input: child, components: tail)

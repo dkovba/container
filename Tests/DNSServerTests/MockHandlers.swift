@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 14:13 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -38,7 +39,9 @@ struct FooHandler: DNSHandler {
 struct BarHandler: DNSHandler {
     public func answer(query: Message) async throws -> Message? {
         let question = query.questions[0]
-        if question.name == "foo." || question.name == "bar." {
+        // Flagged #1: HIGH: `BarHandler` incorrectly handles `"foo."` queries
+        // `BarHandler.answer` matched on `question.name == "foo." || question.name == "bar."`,
+        if question.name == "bar." {
             let ip = try IPv4Address("5.6.7.8")
             return Message(
                 id: query.id,

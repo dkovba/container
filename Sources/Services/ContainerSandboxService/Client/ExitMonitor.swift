@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 16:46 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -81,7 +82,9 @@ public actor ExitMonitor {
         self.runningTasks[id] = Task {
             do {
                 let exitStatus = try await waitingOn()
-                try await onExit(id, exitStatus)
+                // Flagged #1: HIGH: `onExit` callback invoked twice when it throws in `track()`
+                // Both `waitingOn()` and `onExit(id, exitStatus)` are inside the same `do`/`catch` block. If `onExit` throws, the `catch` block catches that error, logs a misleading "WaitHandler for \(id) threw error" message (the error came from `onExit`, not `waitingOn`), and then calls `onExit` a second time with `ExitStatus(exitCode: -1)`.
+                try? await onExit(id, exitStatus)
             } catch {
                 self.log?.error("WaitHandler for \(id) threw error \(String(describing: error))")
                 try? await onExit(id, ExitStatus(exitCode: -1))

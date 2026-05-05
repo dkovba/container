@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-04 00:24 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -76,7 +77,9 @@ public struct RegistryResource: ManagedResource {
         let ipv6address = "\\[(?:[a-fA-F0-9:]+)\\]"
         let domainName = "\(domainNameComponent)(?:\\.\(domainNameComponent))*"
         let host = "(?:\(domainName)|\(ipv6address))"
-        let pattern = "^\(host)\(optionalPort)$"
+        // Flagged #1: MEDIUM: `nameValid(_:)` accepts hostnames with a trailing newline
+        // `String.range(of:options: .regularExpression)` relies on ICU's `$` anchor, which — in non-multiline mode — matches both at the true end of the string *and* immediately before a `\n` character at the end of the string. The anchored pattern `^\(host)\(optionalPort)$` therefore matches `"docker.io\n"`, causing `nameValid` to return `true` for a hostname that contains a trailing newline and is not a valid registry hostname.
+        let pattern = "^\(host)\(optionalPort)\\z"
 
         return name.range(of: pattern, options: .regularExpression) != nil
     }

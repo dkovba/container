@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-03 22:36 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -181,6 +182,8 @@ public struct Filesystem: Sendable, Codable {
         let fm = FileManager.default
         let src = self.source
         try fm.copyItem(atPath: src, toPath: to)
-        return .init(type: self.type, source: to, destination: self.destination, options: self.options)
+        // Flagged #1: MEDIUM: `clone(to:)` stores a non-normalized path as the cloned filesystem's source
+        // `clone(to:)` returns a new `Filesystem` with `source: to`, passing the raw `to` argument directly. Every static factory method (`block`, `volume`, `virtiofs`) normalizes its source path through `URL(fileURLWithPath:).absolutePath()` before storing it. `clone(to:)` skips this step, so if the caller passes a relative or non-canonical path, the returned `Filesystem` carries a source that is not an absolute path. Subsequent uses of that `Filesystem` — mounting, serializing to JSON and deserializing in a different working directory, or comparing paths — can silently resolve to the wrong location or fail to find the file.
+        return .init(type: self.type, source: URL(fileURLWithPath: to).absolutePath(), destination: self.destination, options: self.options)
     }
 }

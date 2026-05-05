@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 16:04 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -26,7 +27,11 @@ public struct InstallRoot {
         .appendingPathComponent("..")
         .standardized
 
-    private static let envPath = ProcessInfo.processInfo.environment[Self.environmentName]
+    // Flagged #1: MEDIUM: Empty `CONTAINER_INSTALL_ROOT` env var resolves to current working directory
+    // `ProcessInfo.processInfo.environment[Self.environmentName]` returns `Optional("")` when the variable is set but empty. The subsequent `envPath.map { URL(fileURLWithPath: $0) }` then creates a URL from an empty string, which `URL(fileURLWithPath:)` resolves to the current working directory instead of falling back to `defaultURL`.
+    private static let envPath = ProcessInfo.processInfo.environment[Self.environmentName].flatMap {
+        $0.isEmpty ? nil : $0
+    }
 
     public static let url = envPath.map { URL(fileURLWithPath: $0) } ?? defaultURL
 

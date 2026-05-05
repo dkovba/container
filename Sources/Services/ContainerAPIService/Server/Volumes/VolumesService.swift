@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 17:38 — 0 critical, 0 high, 3 medium, 1 low (4 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -157,6 +158,12 @@ public actor VolumesService {
             )
         }
 
+        // Flagged #3: MEDIUM: `volumeDiskUsage()` missing volume name validation
+        // `volumeDiskUsage(name:)` did not validate the `name` parameter with `VolumeStorage.isValidVolumeName()`, unlike every other public method that accepts a volume name (`create`, `delete`, `inspect`). Because `volumePath(for:)` uses `URL.appendingPathComponent(name)`, a crafted name containing path-traversal sequences (e.g. `../../etc`) would resolve to a directory outside the volume resource root, and `calculateDirectorySize` would report its size to the caller.
+        guard VolumeStorage.isValidVolumeName(name) else {
+            throw VolumeError.invalidVolumeName("invalid volume name '\(name)': must match \(VolumeStorage.volumeNamePattern)")
+        }
+
         let volumePath = self.volumePath(for: name)
         return self.calculateDirectorySize(at: volumePath)
     }
@@ -209,7 +216,10 @@ public actor VolumesService {
                     }
                 }
 
-                return (allVolumes.count, inUseSet.count, totalSize, reclaimableSize)
+                // Flagged #1: MEDIUM: `calculateDiskUsage()` reports incorrect active volume count
+                // `inUseSet.count` was returned as the "active count," but `inUseSet` collects all volume names referenced by container mounts, including names that do not correspond to any volume in the store. This inflates the active count beyond the actual number of managed volumes that are in use.
+                let activeCount = allVolumes.filter { inUseSet.contains($0.name) }.count
+                return (allVolumes.count, activeCount, totalSize, reclaimableSize)
             }
         }
     }
@@ -313,8 +323,8 @@ public actor VolumesService {
             throw VolumeError.volumeAlreadyExists(name)
         }
 
-        try createVolumeDirectory(for: name)
-
+        // Flagged #4 (1 of 2): LOW: `_create()` leaves orphaned directory on disk when size parsing fails
+        // `createVolumeDirectory(for:)` was called before parsing the size from `driverOpts`. If `parseSize` threw (e.g. invalid size string), the newly created directory was left on the filesystem with no corresponding store entry and no cleanup path.
         // Parse size from driver options (default 512GB)
         let sizeInBytes: UInt64
         if let sizeString = driverOpts["size"] {
@@ -322,6 +332,9 @@ public actor VolumesService {
         } else {
             sizeInBytes = VolumeStorage.defaultVolumeSizeBytes
         }
+
+        // Flagged #4 (2 of 2)
+        try createVolumeDirectory(for: name)
 
         try createVolumeImage(for: name, sizeInBytes: sizeInBytes)
 
@@ -368,8 +381,10 @@ public actor VolumesService {
                 }
             }
 
-            try await self.store.delete(name)
+            // Flagged #2: MEDIUM: `_delete()` removes store entry before filesystem directory, leaving unrecoverable orphaned files
+            // `store.delete(name)` was called before `removeVolumeDirectory(for: name)`. If the filesystem removal failed (e.g. permission error, resource busy), the store entry was already deleted, so the orphaned directory and image file could no longer be discovered or cleaned up through any API operation.
             try self.removeVolumeDirectory(for: name)
+            try await self.store.delete(name)
         }
 
         log.info("deleted volume", metadata: ["name": "\(name)"])

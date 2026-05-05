@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 16:12 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -44,11 +45,15 @@ actor AttachmentAllocator {
     /// Free an allocated network address by hostname.
     @discardableResult
     func deallocate(hostname: String) async throws -> UInt32? {
-        guard let index = hostnames.removeValue(forKey: hostname) else {
+        // Flagged #1 (1 of 2): MEDIUM: `deallocate()` leaks address when `release` throws
+        // `hostnames.removeValue(forKey: hostname)` was called in the `guard` statement before `allocator.release(index)`, so it both looked up and removed the hostname mapping in a single step. If `allocator.release(index)` then threw an error, the hostname-to-address mapping was already deleted from `hostnames` while the address remained allocated in the underlying allocator. The leaked address could never be freed because no hostname pointed to it, and it could never be reallocated because the allocator still considered it in use.
+        guard let index = hostnames[hostname] else {
             return nil
         }
 
         try allocator.release(index)
+        // Flagged #1 (2 of 2)
+        hostnames.removeValue(forKey: hostname)
         return index
     }
 

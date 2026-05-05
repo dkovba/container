@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-03 22:56 — 1 critical, 1 high, 0 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -79,8 +80,12 @@ extension [PublishPort] {
     public func hasOverlaps() -> Bool {
         var hostPorts = Set<String>()
         for publishPort in self {
-            for index in publishPort.hostPort..<(publishPort.hostPort + publishPort.count) {
-                let hostPortKey = "\(index)/\(publishPort.proto.rawValue)"
+            // Flagged #1: CRITICAL: `hasOverlaps()` traps on overflow when `hostPort + count > 65535`
+            // The range expression `publishPort.hostPort..<(publishPort.hostPort + publishPort.count)` performs arithmetic on two `UInt16` values. Swift integer arithmetic traps on overflow, so any combination where `hostPort + count` exceeds 65535 causes a runtime crash.
+            for index in UInt32(publishPort.hostPort)..<(UInt32(publishPort.hostPort) + UInt32(publishPort.count)) {
+                // Flagged #2: HIGH: `hasOverlaps()` reports false overlaps for rules on different host addresses
+                // The overlap key `"\(index)/\(publishPort.proto.rawValue)"` omits the host address. Two port-forwarding rules that bind the same port number on different host IP addresses (e.g., `127.0.0.1:8080` and `192.168.1.1:8080`) do not conflict, but the missing address component causes `hasOverlaps()` to incorrectly return `true` for them.
+                let hostPortKey = "\(publishPort.hostAddress)/\(index)/\(publishPort.proto.rawValue)"
                 guard !hostPorts.contains(hostPortKey) else {
                     return true
                 }

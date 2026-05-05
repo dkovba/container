@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-06 16:27 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -18,7 +19,9 @@ struct KeyExistsError: Error {}
 
 class LRUCache<K: Hashable, V> {
     private class Node {
-        fileprivate var prev: Node?
+        // Flagged #1: MEDIUM: Retain cycle memory leak in `LRUCache` doubly-linked list
+        // `prev` was a strong reference (`var prev: Node?`), creating retain cycles between every pair of adjacent nodes in the doubly-linked list. When the `LRUCache` instance is deallocated, internal nodes hold mutual strong references (A.next → B and B.prev → A) and never reach a reference count of zero.
+        fileprivate weak var prev: Node?
         fileprivate var next: Node?
         fileprivate let key: K
         fileprivate let value: V

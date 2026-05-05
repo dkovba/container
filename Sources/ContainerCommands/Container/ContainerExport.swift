@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 06:49 — 0 critical, 0 high, 0 medium, 1 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -63,7 +64,9 @@ extension Application {
                 while true {
                     let chunk = fileHandle.readData(ofLength: bufferSize)
                     if chunk.isEmpty { break }
-                    FileHandle.standardOutput.write(chunk)
+                    // Flagged #1: LOW: `FileHandle.standardOutput.write(_:)` uses the deprecated non-throwing API, crashing on write errors
+                    // `FileHandle.standardOutput.write(chunk)` calls the deprecated ObjC-bridged `write(_:)` method, which does not throw on failure. When the write fails — for example when stdout is a broken pipe because the caller piped the output to a command that exited early (e.g. `container export myid | head`) — this API raises an unhandled ObjC exception, which Swift converts to a fatal `NSException` that terminates the process unconditionally. The throwing replacement `write(contentsOf:)` propagates the error as a normal Swift error, allowing the runtime to unwind the stack and report the failure cleanly.
+                    try FileHandle.standardOutput.write(contentsOf: chunk)
                 }
                 try fileHandle.close()
             } else {

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 18:13 — 0 critical, 2 high, 0 medium, 1 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -69,7 +70,9 @@ extension Application {
             guard let binaryPath else {
                 throw ArgumentParser.ValidationError("missing argument '--binary'")
             }
-            let absolutePath = URL(fileURLWithPath: binaryPath, relativeTo: .currentDirectory()).absoluteURL.absoluteString
+            // Flagged #1: HIGH: `setKernelFromBinary()` passes a `file://` URI instead of a filesystem path
+            // `.absoluteURL.absoluteString` on a file URL produces a string like `file:///Users/path/to/kernel`, not a filesystem path. This value is passed to `ClientKernel.installKernel(kernelFilePath:)` which expects a plain filesystem path, causing the kernel installation to fail with a file-not-found error.
+            let absolutePath = URL(fileURLWithPath: binaryPath, relativeTo: .currentDirectory()).absoluteURL.path
             let platform = try getSystemPlatform()
             try await ClientKernel.installKernel(kernelFilePath: absolutePath, platform: platform, force: force)
         }
@@ -79,10 +82,14 @@ extension Application {
                 throw ArgumentParser.ValidationError("missing argument '--binary'")
             }
             guard let tarPath else {
-                throw ArgumentParser.ValidationError("missing argument '--tar")
+                // Flagged #3: LOW: Missing closing quote in `--tar` validation error message
+                // The error string `"missing argument '--tar"` is missing the closing single quote, producing an inconsistent message compared to the `--binary` validation error on line 70 which correctly uses `'--binary'`.
+                throw ArgumentParser.ValidationError("missing argument '--tar'")
             }
             let platform = try getSystemPlatform()
-            let localTarPath = URL(fileURLWithPath: tarPath, relativeTo: .currentDirectory()).path
+            // Flagged #2: HIGH: `setKernelFromTar()` uses `.path` instead of `.absoluteURL.path` to resolve the tar file location
+            // `URL(fileURLWithPath: tarPath, relativeTo: .currentDirectory()).path` returns only the relative path component when `tarPath` is a relative path, because the URL was constructed with a `relativeTo:` base. The sibling method `setKernelFromBinary()` correctly uses `.absoluteURL.path` on the same kind of URL (line 72), but `setKernelFromTar()` omits `.absoluteURL`.
+            let localTarPath = URL(fileURLWithPath: tarPath, relativeTo: .currentDirectory()).absoluteURL.path
             let fm = FileManager.default
             if fm.fileExists(atPath: localTarPath) {
                 try await ClientKernel.installKernelFromTar(tarFile: localTarPath, kernelFilePath: binaryPath, platform: platform, force: force)

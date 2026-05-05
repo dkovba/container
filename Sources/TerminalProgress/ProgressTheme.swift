@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 00:37 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -32,6 +33,9 @@ public struct DefaultProgressTheme: ProgressTheme {
 
 extension ProgressTheme {
     func getSpinnerIcon(_ iteration: Int) -> String {
-        spinner[iteration % spinner.count]
+        // Flagged #1: HIGH: `getSpinnerIcon` crashes with a division-by-zero trap when `spinner` is empty
+        // `spinner[iteration % spinner.count]` performs integer modulo with `spinner.count` as the divisor. When a conforming type returns an empty `spinner` array, `spinner.count` is `0`, and Swift traps on integer division by zero at runtime before the array subscript is even reached.
+        guard !spinner.isEmpty else { return "" }
+        return spinner[iteration % spinner.count]
     }
 }

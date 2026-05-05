@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 22:13 — 0 critical, 0 high, 2 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -58,7 +59,9 @@ public struct Utility {
     }
 
     public static func validEntityName(_ name: String) throws {
-        let pattern = #"^[a-zA-Z0-9][a-zA-Z0-9_.-]+$"#
+        // Flagged #1: MEDIUM: `validEntityName` regex rejects valid single-character names
+        // The regex pattern `^[a-zA-Z0-9][a-zA-Z0-9_.-]+$` uses `+` (one or more) for the second character class, requiring entity names to be at least two characters long. A valid single-character name such as `"a"` is incorrectly rejected with an `invalidArgument` error.
+        let pattern = #"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"#
         let regex = try Regex(pattern)
         if try regex.firstMatch(in: name) == nil {
             throw ContainerizationError(.invalidArgument, message: "invalid entity name \(name)")
@@ -346,7 +349,9 @@ public struct Utility {
     public static func parseKeyValuePairs(_ pairs: [String]) -> [String: String] {
         var result: [String: String] = [:]
         for pair in pairs {
-            let components = pair.split(separator: "=", maxSplits: 1)
+            // Flagged #2: MEDIUM: `parseKeyValuePairs` corrupts keys for `"key="` inputs
+            // `split(separator:maxSplits:)` defaults to `omittingEmptySubsequences: true`, so splitting `"key="` produces `["key"]` (one element) instead of `["key", ""]` (two elements). The single-element path then stores the entire original string `"key="` as the dictionary key with an empty value, instead of correctly storing `"key"` as the key.
+            let components = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
             if components.count == 2 {
                 result[String(components[0])] = String(components[1])
             } else {

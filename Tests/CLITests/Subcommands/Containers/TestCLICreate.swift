@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 21:09 — 0 critical, 1 high, 1 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -36,14 +37,18 @@ class TestCLICreateCommand: CLITest {
         let expectedMAC = try MACAddress("02:42:ac:11:00:03")
         #expect(throws: Never.self, "expected container create with MAC address to succeed") {
             try doCreate(name: name, networks: ["default,mac=\(expectedMAC)"])
-            try doStart(name: name)
+            // Flagged #2 (1 of 2): MEDIUM: `defer` cleanup unreachable when `doStart` throws in `testCreateWithMACAddress` and `testCreateWithFQDNName`
+            // In both `testCreateWithMACAddress` and `testCreateWithFQDNName`, the `defer` block containing `doStop`/`doRemove` was registered after `doStart(name:)`. If `doStart` threw an error, the `defer` had not yet been registered, so the container created by `doCreate` on the preceding line was never removed.
             defer {
                 try? doStop(name: name)
                 try? doRemove(name: name)
             }
+            try doStart(name: name)
             try waitForContainerRunning(name)
             let inspectResp = try inspectContainer(name)
-            #expect(inspectResp.networks.count > 0, "expected at least one network attachment")
+            // Flagged #1: HIGH: `networks[0]` crashes after non-fatal `#expect` in `testCreateWithMACAddress`
+            // `#expect(inspectResp.networks.count > 0)` is a non-fatal assertion—it records a test failure but does not stop execution. The very next line accesses `inspectResp.networks[0]`, which traps with an index-out-of-bounds if the array is empty.
+            try #require(inspectResp.networks.count > 0, "expected at least one network attachment")
             let actualMAC = inspectResp.networks[0].macAddress?.description ?? "nil"
             #expect(
                 actualMAC == expectedMAC.description, "expected MAC address \(expectedMAC), got \(actualMAC)"
@@ -102,11 +107,12 @@ class TestCLICreateCommand: CLITest {
         let expectedHostname = "test"
         #expect(throws: Never.self, "expected container create with FQDN name to succeed") {
             try doCreate(name: name)
-            try doStart(name: name)
+            // Flagged #2 (2 of 2)
             defer {
                 try? doStop(name: name)
                 try? doRemove(name: name)
             }
+            try doStart(name: name)
             try waitForContainerRunning(name)
             let inspectResp = try inspectContainer(name)
             let attachmentHostname = inspectResp.networks.first?.hostname ?? ""

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 03:04 — 0 critical, 1 high, 3 medium, 0 low (4 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -43,6 +44,9 @@ class TestCLIRunLifecycle: CLITest {
             defer {
                 try? self.doStop(name: name)
             }
+            // Flagged #2: MEDIUM: `testRunFailureCleanup` races against container startup before exec
+            // `doLongRun` starts the container detached and returns before the container reaches the running state. The test immediately calls `doExec(name:cmd:["date"])` with no intervening `waitForContainerRunning`.
+            try self.waitForContainerRunning(name)
             let _ = try self.doExec(name: name, cmd: ["date"])
             try self.doStop(name: name)
         }
@@ -106,6 +110,9 @@ class TestCLIRunLifecycle: CLITest {
         defer {
             try? doStop(name: server)
         }
+        // Flagged #3: MEDIUM: `testStartPortBindFails` does not wait for server container to bind its port before starting the conflicting container
+        // `doLongRun` starts the server container detached and returns before the container reaches the running state and before the python http.server process inside it has bound the port.
+        try waitForContainerRunning(server)
 
         #expect(throws: CLIError.self) {
             try doStart(name: name)
@@ -132,6 +139,9 @@ class TestCLIRunLifecycle: CLITest {
         defer {
             try? doStop(name: name)
         }
+        // Flagged #1: MEDIUM: `testExecInvalidExcutable` races against container startup before exec
+        // `doLongRun` returns before the container reaches running state. The test called `doExec` immediately after `doLongRun` with no intervening `waitForContainerRunning`.
+        try waitForContainerRunning(name)
 
         #expect(throws: CLIError.self, "executing invalid executable must throw error, not hang") {
             try doExec(

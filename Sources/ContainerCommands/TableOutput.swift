@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 14:35 — 1 critical, 0 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -34,7 +35,9 @@ public struct TableOutput: Sendable {
 
         for rowIndex in 0..<self.rows.count {
             let row = self.rows[rowIndex]
-            for columnIndex in 0..<row.count - 1 {
+            // Flagged #1: CRITICAL: `format()` crashes on empty row
+            // `0..<row.count - 1` creates an invalid range when `row` is an empty array, because `row.count - 1` evaluates to `-1` and Swift's `Range` requires `lowerBound <= upperBound`, causing a fatal error at runtime.
+            for columnIndex in 0..<max(row.count - 1, 0) {
                 let currentLength = (maxLengths[columnIndex] ?? 0) + self.spacing
                 let padded = row[columnIndex].padding(toLength: currentLength, withPad: " ", startingAt: 0)
                 output += padded

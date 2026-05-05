@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 15:41 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -80,6 +81,9 @@ public actor FilesystemEntityStore<T>: EntityStore where T: Codable & Identifiab
 
     public func upsert(_ entity: T) async throws {
         let metadataUrl: URL = metadataUrl(entity.id)
+        // Flagged #1: MEDIUM: `upsert()` fails for new entities due to missing directory
+        // `upsert` writes to `metadataUrl` without first creating the entity directory. The sibling `create` method calls `createDirectory(at: entityUrl(entity.id), withIntermediateDirectories: true)` before writing, but `upsert` omits this step. When upserting an entity that does not already exist on disk, `data.write(to:)` throws because the parent directory is absent.
+        try FileManager.default.createDirectory(at: entityUrl(entity.id), withIntermediateDirectories: true)
         let data = try encoder.encode(entity)
         try data.write(to: metadataUrl)
         index[entity.id] = entity

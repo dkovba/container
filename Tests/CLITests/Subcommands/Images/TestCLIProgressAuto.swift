@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-30 13:11 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -54,6 +55,9 @@ class TestCLIProgressAuto: CLITest {
         let lines = error.components(separatedBy: .newlines)
             .filter { !$0.contains("Warning! Running debug build") && !$0.isEmpty }
         #expect(!lines.isEmpty, "expected ansi progress output on stderr")
+        // Flagged #1: MEDIUM: `testExplicitAnsiProgress` missing assertion for ANSI escape codes
+        // `testExplicitAnsiProgress` verifies that output lines exist but never asserts that the stderr output actually contains ANSI escape sequences (`\u{1B}[`). The companion tests for `auto` and `plain` modes both assert the absence of ANSI escapes, but the `ansi` mode test omits the symmetric positive check, allowing a regression where `--progress ansi` silently falls back to plain output to go undetected.
+        #expect(error.contains("\u{1B}["), "expected ANSI escapes with --progress ansi")
     }
 
     @Test func testNoneProgressSuppressesOutput() throws {

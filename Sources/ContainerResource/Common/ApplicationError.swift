@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 23:48 — 0 critical, 0 high, 0 medium, 1 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -14,11 +15,12 @@
 // limitations under the License.
 //===----------------------------------------------------------------------===//
 
-/// Protocol for errors with a stable code and structured metadata.
-/// This allows the client to present the error as it chooses.
-
 import OrderedCollections
 
+// Flagged #1: LOW: `AppError` protocol missing its documentation comment
+// The `///` doc comment block for `AppError` was placed before the `import OrderedCollections` statement, with a blank line separating the comment from the import. In Swift, a `///` comment separated from the next declaration by a blank line is not attached to any symbol, so the comment documented nothing. `AppError` had no generated documentation.
+/// Protocol for errors with a stable code and structured metadata.
+/// This allows the client to present the error as it chooses.
 public protocol AppError: Error {
     var code: AppErrorCode { get }
     var metadata: OrderedDictionary<String, String> { get }

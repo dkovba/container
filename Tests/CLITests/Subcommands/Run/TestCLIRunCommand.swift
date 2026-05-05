@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-30 15:12 — 0 critical, 4 high, 1 medium, 1 low (6 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -30,7 +31,9 @@ import Testing
 // environment variable to limit concurrency and rejoin these suites.
 class TestCLIRunCommand1: CLITest {
     func getTestName() -> String {
-        Test.current!.name.trimmingCharacters(in: ["(", ")"]).lowercased()
+        // Flagged #5 (1 of 3): MEDIUM: `getTestName()` incorrectly lowercases the test name in all three test classes
+        // `getTestName()` applied `.lowercased()` to the result, making it return an already-lowercased name. This rendered `getLowercasedTestName()` a redundant double-lowercase no-op, and caused every test that called `getTestName()` directly to receive a lowercased container name when a case-preserving name was intended. Only `getLowercasedTestName()` should lowercase.
+        Test.current!.name.trimmingCharacters(in: ["(", ")"])
     }
 
     func getLowercasedTestName() -> String {
@@ -291,7 +294,8 @@ class TestCLIRunCommand1: CLITest {
 
 class TestCLIRunCommand2: CLITest {
     func getTestName() -> String {
-        Test.current!.name.trimmingCharacters(in: ["(", ")"]).lowercased()
+        // Flagged #5 (2 of 3)
+        Test.current!.name.trimmingCharacters(in: ["(", ")"])
     }
 
     func getLowercasedTestName() -> String {
@@ -305,13 +309,15 @@ class TestCLIRunCommand2: CLITest {
             let testData = "hello world"
             let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            // Flagged #6 (1 of 2): LOW: Temp directory leaked on early return in `testRunCommandMount` and `testRunCommandVolume`
+            // In both `testRunCommandMount` and `testRunCommandVolume`, a temporary directory was created with `createDirectory`, then a file was created inside it via a `guard` on `createFile`. The `defer` block that removes the directory was placed *after* the `guard`. If `createFile` returned `false`, the `guard`'s `return` exited the scope before the `defer` was registered, so the already-created directory was never cleaned up.
+            defer {
+                try? FileManager.default.removeItem(at: tempDir)
+            }
             let tempFile = tempDir.appendingPathComponent(UUID().uuidString)
             guard FileManager.default.createFile(atPath: tempFile.path(), contents: Data(testData.utf8)) else {
                 Issue.record("failed to create temporary file \(tempFile.path())")
                 return
-            }
-            defer {
-                try? FileManager.default.removeItem(at: tempDir)
             }
             try doLongRun(name: name, args: ["--mount", "type=virtiofs,source=\(tempDir.path()),target=\(targetContainerPath),readonly"])
             defer {
@@ -372,9 +378,12 @@ class TestCLIRunCommand2: CLITest {
             }
             let output = try doExec(name: name, cmd: ["df", targetContainerPath])
             let lines = output.split(separator: "\n")
-            #expect(lines.count == 2, "expected only two rows of output, instead got \(lines.count)")
+            // Flagged #3 (1 of 2): HIGH: Index out of bounds on `lines[1]` and `words[0]` in `testRunCommandTmpfs`
+            // Two `#expect` calls guarded array accesses but did not halt execution on failure. `#expect(lines.count == 2, ...)` was followed by `lines[1]`, so if `df` produced fewer than 2 lines of output, the subscript would crash. Similarly, `#expect(words.count > 1, ...)` was followed by `words[0]`, so if the second line split into zero words, that subscript would also crash.
+            try #require(lines.count == 2, "expected only two rows of output, instead got \(lines.count)")
             let words = lines[1].split(separator: " ")
-            #expect(words.count > 1, "expected information to contain multiple words, got \(words.count)")
+            // Flagged #3 (2 of 2)
+            try #require(words.count > 1, "expected information to contain multiple words, got \(words.count)")
             #expect(words[0].lowercased() == expectedFilesystem, "expected filesystem type to be \(expectedFilesystem), instead got \(output)")
             try doStop(name: name)
         } catch {
@@ -430,13 +439,14 @@ class TestCLIRunCommand2: CLITest {
             let testData = "one small step"
             let volume = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: volume, withIntermediateDirectories: true)
+            // Flagged #6 (2 of 2)
+            defer {
+                try? FileManager.default.removeItem(at: volume)
+            }
             let volumeFile = volume.appendingPathComponent(UUID().uuidString)
             guard FileManager.default.createFile(atPath: volumeFile.path(), contents: Data(testData.utf8)) else {
                 Issue.record("failed to create file at \(volumeFile)")
                 return
-            }
-            defer {
-                try? FileManager.default.removeItem(at: volume)
             }
             try doLongRun(name: name, args: ["--volume", "\(volume.path):\(targetContainerPath)"])
             defer {
@@ -559,7 +569,8 @@ class TestCLIRunCommand2: CLITest {
 
 class TestCLIRunCommand3: CLITest {
     func getTestName() -> String {
-        Test.current!.name.trimmingCharacters(in: ["(", ")"]).lowercased()
+        // Flagged #5 (3 of 3)
+        Test.current!.name.trimmingCharacters(in: ["(", ")"])
     }
 
     func getLowercasedTestName() -> String {
@@ -650,9 +661,13 @@ class TestCLIRunCommand3: CLITest {
 
             let expectedEntries = [("127.0.0.1", "localhost"), (ip.description, name)]
 
-            for (i, line) in lines.enumerated() {
+            // Flagged #2: HIGH: Index out of bounds on `expectedEntries` in `testRunDefaultHostsEntries`
+            // The loop `for (i, line) in lines.enumerated()` iterated over every line in `/etc/hosts` and used `i` to index into `expectedEntries`, which has exactly 2 elements. If `/etc/hosts` contained more than 2 lines (e.g., an IPv6 `::1 localhost` entry), the subscript `expectedEntries[i]` would access an out-of-bounds index, crashing the test process.
+            for (i, line) in lines.enumerated() where i < expectedEntries.count {
                 let words = line.split(separator: " ").map { String($0) }
-                #expect(words.count >= 2, "expected /etc/hosts entry to have 2 or more entries")
+                // Flagged #4: HIGH: Index out of bounds on `words[0]` and `words[1]` in `testRunDefaultHostsEntries`
+                // `#expect(words.count >= 2, ...)` checked that a `/etc/hosts` line had at least two whitespace-separated tokens, but `#expect` only records a failure and continues execution. The subsequent lines accessed `words[0]` and `words[1]` unconditionally. If a line in `/etc/hosts` was blank or contained only a single token, those subscripts would crash with an index-out-of-bounds trap.
+                try #require(words.count >= 2, "expected /etc/hosts entry to have 2 or more entries")
                 let expected = expectedEntries[i]
                 #expect(expected.0 == words[0], "expected /etc/hosts entries IP to be \(expected.0), instead got \(words[0])")
                 #expect(expected.1 == words[1], "expected /etc/hosts entries host to be \(expected.1), instead got \(words[1])")
@@ -835,6 +850,9 @@ class TestCLIRunCommand3: CLITest {
                     try handle.close()
                 } catch {
                     Issue.record(error)
+                    // Flagged #1: HIGH: `group.leave()` skipped on error path causing deadlock in `testRunCommandEnvFileFromNamedPipe`
+                    // `group.leave()` was placed after the `do`/`catch` block. The `catch` branch called `return` before reaching `group.leave()`, so any failure in the `FileHandle` operations caused the dispatch group to never be balanced. The subsequent `group.wait()` call on the main thread would then block indefinitely.
+                    group.leave()
                     return
                 }
 

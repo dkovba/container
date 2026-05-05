@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 21:48 — 0 critical, 3 high, 0 medium, 0 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -55,18 +56,26 @@ public enum RequestScheme: String, Sendable {
     /// Checks if the given `host` string is a private IP address
     /// or a domain typically reachable only on the local system.
     private static func isInternalHost(host: String) -> Bool {
-        if host.hasPrefix("localhost") || host.hasPrefix("127.") {
+        // Flagged #1: HIGH: `isInternalHost` misclassifies external hosts starting with "localhost" as internal
+        // `host.hasPrefix("localhost")` matches any hostname that begins with the string "localhost", such as `localhostevil.com` or `localhost.attacker.org`, incorrectly treating them as internal hosts.
+        // Flagged #3 (1 of 3): HIGH: `isInternalHost` private-IP prefix checks match non-IP hostnames
+        // The `hasPrefix("127.")`, `hasPrefix("192.168.")`, `hasPrefix("10.")`, and `172.16-31` regex checks operate on raw string prefixes without verifying the host is an IPv4 address. Hostnames such as `10.evil.com`, `127.attacker.org`, `192.168.phishing.net`, or `172.16.malicious.com` match these prefix checks and are incorrectly classified as internal.
+        if host == "localhost" || (host.allSatisfy({ $0 == "." || ($0.isASCII && $0.isNumber) }) && host.hasPrefix("127.")) {
             return true
         }
-        if host.hasPrefix("192.168.") || host.hasPrefix("10.") {
+        // Flagged #3 (2 of 3)
+        if host.allSatisfy({ $0 == "." || ($0.isASCII && $0.isNumber) }) && (host.hasPrefix("192.168.") || host.hasPrefix("10.")) {
             return true
         }
         let regex = "(^172\\.1[6-9]\\.)|(^172\\.2[0-9]\\.)|(^172\\.3[0-1]\\.)"
-        if host.range(of: regex, options: .regularExpression) != nil {
+        // Flagged #3 (3 of 3)
+        if host.allSatisfy({ $0 == "." || ($0.isASCII && $0.isNumber) }) && host.range(of: regex, options: .regularExpression) != nil {
             return true
         }
         let dnsDomain = DefaultsStore.get(key: .defaultDNSDomain)
-        if host.hasSuffix(".\(dnsDomain)") {
+        // Flagged #2: HIGH: `isInternalHost` misclassifies external hosts as internal when DNS domain is empty
+        // When `DefaultsStore.get(key: .defaultDNSDomain)` returns an empty string, the expression `".\(dnsDomain)"` evaluates to `"."`, causing `host.hasSuffix(".")` to match any host written in FQDN form (e.g., `evil.com.`), incorrectly treating it as internal.
+        if !dnsDomain.isEmpty && host.hasSuffix(".\(dnsDomain)") {
             return true
         }
         return false

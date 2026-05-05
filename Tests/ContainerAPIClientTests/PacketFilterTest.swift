@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 03:10 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -82,6 +83,9 @@ struct PacketFilterTest {
 
     @Test
     func testPacketFilterReinitialize() async throws {
+        // Flagged #1: HIGH: `testPacketFilterReinitialize` always expects a throw, failing when run as root
+        // `#expect(throws: ContainerizationError.self) { try pf.reinitialize() }` unconditionally requires `reinitialize()` to throw. When the test is run as root, `pfctl -n -f /etc/pf.conf` and `pfctl -f /etc/pf.conf` both succeed, so `reinitialize()` returns normally and no error is thrown, causing the `#expect(throws:)` assertion to record a test failure.
+        guard getuid() != 0 else { return }
         let pf = PacketFilter()
         #expect(throws: ContainerizationError.self) {
             try pf.reinitialize()

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 14:56 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -23,7 +24,9 @@ import Foundation
 import Logging
 import SystemPackage
 
-public actor HealthCheckHarness {
+// Flagged #1: MEDIUM: `HealthCheckHarness` unnecessarily declared as `actor` instead of `struct`
+// `HealthCheckHarness` is declared as `public actor` despite having no mutable state — all properties are `let` constants. Every other harness in the codebase (`ContainersHarness`, `DiskUsageHarness`, `KernelHarness`, `VolumesHarness`, `NetworksHarness`, `PluginsHarness`) uses `public struct ... : Sendable`. Using `actor` forces all `ping` handler invocations to serialize through the actor's executor, adding unnecessary latency to health check responses under concurrent load.
+public struct HealthCheckHarness: Sendable {
     private let appRoot: URL
     private let installRoot: URL
     private let logRoot: FilePath?

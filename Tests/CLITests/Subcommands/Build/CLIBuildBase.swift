@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 19:10 — 0 critical, 1 high, 1 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -215,7 +216,9 @@ class TestCLIBuildBase: CLITest {
     func createEntry(_ entry: FileSystemEntry, _ contextDir: URL) throws {
         switch entry {
         // last 2 params are uid and gid
-        case .file(let path, let content, let permissions, _, _):
+        // Flagged #1 (1 of 2): HIGH: `setAttributes` disabled by bug in path argument and discarded uid/gid bindings
+        // Two coupled defects disabled file attribute application in the `.file` case of `createEntry`. First, line 218 discards the `uid` and `gid` associated values with wildcard patterns (`_, _`), making them unavailable in the case body. Second, the `setAttributes` call on lines 240-248 was commented out because it passed `fullPath.absoluteURL.absoluteString` to `ofItemAtPath:`. The `.absoluteString` property returns a URL-scheme string (e.g. `file:///path/to/file`) rather than a filesystem path, causing `setAttributes` to fail with a file-not-found error. The TODO comment confirms the failure was observed but the root cause was not identified.
+        case .file(let path, let content, let permissions, let uid, let gid):
             let fullPath = contextDir.appending(path: path)
             // not using .absoluteURL deletes the last component from fullPath
             let directory: URL = fullPath.absoluteURL.deletingLastPathComponent()
@@ -237,15 +240,15 @@ class TestCLIBuildBase: CLITest {
                 ftruncate(fd, off_t(size))
             }
 
-        // TODO: figure out why this block fails
-        // try FileManager.default.setAttributes(
-        //     [
-        //         .posixPermissions: Int(permissions.rawValue),
-        //         .ownerAccountID: uid,
-        //         .groupOwnerAccountID: gid,
-        //     ],
-        //     ofItemAtPath: fullPath.absoluteURL.absoluteString
-        // )
+            // Flagged #1 (2 of 2)
+            try FileManager.default.setAttributes(
+                [
+                    .posixPermissions: Int(permissions.rawValue),
+                    .ownerAccountID: uid,
+                    .groupOwnerAccountID: gid,
+                ],
+                ofItemAtPath: fullPath.absoluteURL.path
+            )
 
         case .directory(let path, let permissions, let uid, let gid):
             let fullPath = contextDir.appendingPathComponent(path).absoluteURL
@@ -270,7 +273,9 @@ class TestCLIBuildBase: CLITest {
             let targetURL = contextDir.appendingPathComponent(target)
             try FileManager.default.createSymbolicLink(
                 atPath: fullPath.path,
-                withDestinationPath: targetURL.relativePathFrom(from: fullPath)
+                // Flagged #2: MEDIUM: Symbolic link relative path computed from the link itself instead of its parent directory
+                // `targetURL.relativePathFrom(from: fullPath)` computes the relative path from the symlink file URL rather than from the symlink's containing directory. Because `fullPath` points to the symlink entry (not a directory), the resulting relative path has an extra superfluous `../` prefix, causing the symlink to point to the wrong location.
+                withDestinationPath: targetURL.relativePathFrom(from: directory)
             )
             lchown(fullPath.path, uid, gid)
         }

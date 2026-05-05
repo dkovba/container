@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-30 14:15 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -31,7 +32,9 @@ class TestCLIRegistry: CLITest {
 
     @Test func testListJSONFormat() throws {
         let (data, _, error, status) = try run(arguments: ["registry", "list", "--format", "json"])
-        #expect(status == 0, "registry list --format json should succeed, stderr: \(error)")
+        // Flagged #1 (1 of 2): MEDIUM: `#expect` instead of `#require` for status checks allows dependent code to execute after command failure
+        // Two test methods (`testListJSONFormat`, `testListQuietMode`) used `#expect(status == 0, ...)` which is non-fatal, then executed code that depends on the command having succeeded. When the command fails, `#expect` records a failure but continues execution: in `testListJSONFormat`, `JSONSerialization.jsonObject(with: data)` throws a confusing JSON-parsing error on empty data; in `testListQuietMode`, the negative assertions `!output.contains("HOSTNAME")` and `!output.contains("USERNAME")` pass trivially on empty output, producing false passes that mask the real failure.
+        try #require(status == 0, "registry list --format json should succeed, stderr: \(error)")
 
         let json = try JSONSerialization.jsonObject(with: data, options: [])
         #expect(json is [Any], "JSON output should be an array")
@@ -39,7 +42,8 @@ class TestCLIRegistry: CLITest {
 
     @Test func testListQuietMode() throws {
         let (_, output, error, status) = try run(arguments: ["registry", "list", "-q"])
-        #expect(status == 0, "registry list -q should succeed, stderr: \(error)")
+        // Flagged #1 (2 of 2)
+        try #require(status == 0, "registry list -q should succeed, stderr: \(error)")
 
         #expect(!output.contains("HOSTNAME"), "quiet mode should not contain headers")
         #expect(!output.contains("USERNAME"), "quiet mode should not contain headers")

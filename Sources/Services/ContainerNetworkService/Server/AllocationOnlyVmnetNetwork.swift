@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 15:57 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -23,7 +24,9 @@ import Logging
 
 public actor AllocationOnlyVmnetNetwork: Network {
     // The IPv4 subnet to be used if none explicitly passed in the `NetworkConfiguration`
-    private static let defaultIPv4Subnet = try! CIDRv4("192.168.64.1/24")
+    // Flagged #1: MEDIUM: Default subnet CIDR uses host address instead of network address
+    // `CIDRv4("192.168.64.1/24")` specifies a host address (`.1`) rather than the network address (`.0`). `CIDRv4` stores the literal address in its `address` property and `description` returns `"\(address)/\(prefix)"`, so the non-canonical `192.168.64.1/24` appears in all log output and Codable serialization even though `lower` normalizes for gateway computation.
+    private static let defaultIPv4Subnet = try! CIDRv4("192.168.64.0/24")
 
     private let log: Logger
     private var _state: NetworkState

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 20:51 — 0 critical, 0 high, 2 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -78,8 +79,15 @@ class TestCLIRunBase: CLITest {
             timeoutTask.cancel()
             return found
         } catch is CancellationError {
+            // Flagged #1 (1 of 2): MEDIUM: `containerRun` leaks unstructured tasks on error paths
+            // `stdoutListenTask` and `timeoutTask` are unstructured `Task`s that do not inherit parent cancellation. In the `catch is CancellationError` branch, neither task was cancelled. In the general `catch` branch (reached when `exec()` throws), neither task was cancelled either. Both tasks would continue running after the function returned — `timeoutTask` sleeping for up to 5 seconds and `stdoutListenTask` reading from the terminal file descriptor indefinitely.
+            stdoutListenTask.cancel()
+            timeoutTask.cancel()
             throw CLIError.executionFailed("timeout hit")
         } catch {
+            // Flagged #1 (2 of 2)
+            stdoutListenTask.cancel()
+            timeoutTask.cancel()
             throw error
         }
     }
@@ -88,7 +96,9 @@ class TestCLIRunBase: CLITest {
         let stdin = FileHandle(fileDescriptor: terminal.handle.fileDescriptor, closeOnDealloc: false)
         try commands.forEach { cmd in
             let cmdLine = cmd.appending("\n")
-            guard let cmdNormalized = cmdLine.data(using: .ascii) else {
+            // Flagged #2: MEDIUM: `exec` rejects non-ASCII shell commands due to `.ascii` encoding
+            // `cmdLine.data(using: .ascii)` returns `nil` for any string containing non-ASCII UTF-8 characters (e.g. file paths with accented characters, Unicode arguments). The `guard` then throws `CLIError.invalidInput`, falsely rejecting a valid command.
+            guard let cmdNormalized = cmdLine.data(using: .utf8) else {
                 throw CLIError.invalidInput("shell command \(cmd) is invalid")
             }
             try stdin.write(contentsOf: cmdNormalized)

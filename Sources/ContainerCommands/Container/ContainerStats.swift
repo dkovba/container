@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 16:57 — 0 critical, 0 high, 3 medium, 0 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -149,10 +150,20 @@ extension Application {
                     if statsData.isEmpty {
                         try await Task.sleep(for: .seconds(2))
                     }
+                // Flagged #1: MEDIUM: `CancellationError` swallowed by catch-all in `runStreaming`, causing spurious error output and non-clean exit
+                // The `while true` streaming loop's `catch` block caught all errors unconditionally, including `CancellationError`. When the task was cancelled (e.g. because the user pressed Ctrl+C and the signal handler fired `group.cancelAll()`), any in-flight `Task.sleep` threw `CancellationError`. That error was caught by the catch-all, `clearScreen()` and `print("error collecting stats: \(error)")` were called (printing a spurious message to the alternate-screen buffer), and then a second `try await Task.sleep(for: .seconds(2))` was attempted. Because the task was still cancelled, the second sleep also threw `CancellationError` immediately, which propagated out of the `catch` block, out of the `while true` loop, and out of `runStreaming` as an unhandled throw — rather than the function returning normally.
+                } catch is CancellationError {
+                    return
                 } catch {
                     clearScreen()
                     print("error collecting stats: \(error)")
-                    try await Task.sleep(for: .seconds(2))
+                    // Flagged #3: MEDIUM: `CancellationError` from `Task.sleep` inside the error-handling `catch` block in `runStreaming` propagates unhandled, causing non-clean exit
+                    // The error-handling `catch` block in `runStreaming`'s `while true` loop handles real (non-cancellation) errors by clearing the screen, printing the error, and then calling `try await Task.sleep(for: .seconds(2))` to throttle retries. This `Task.sleep` call was bare — not protected by any `catch`. If the task was cancelled while sleeping in this error-handler path (e.g., the user pressed Ctrl+C immediately after a stats-collection error), `Task.sleep` threw `CancellationError`. A throw from within a `catch` clause propagates to the enclosing scope, bypassing all sibling `catch` clauses. The existing `catch is CancellationError { return }` guard applies only to throws from within the preceding `do { }` block, not to throws originating inside its own `catch` clause. The `CancellationError` therefore escaped the `do/catch` statement entirely, propagated out of the `while true` loop, and caused `runStreaming` to exit via an unhandled throw rather than a clean `return`.
+                    do {
+                        try await Task.sleep(for: .seconds(2))
+                    } catch is CancellationError {
+                        return
+                    }
                 }
             }
         }
@@ -172,6 +183,10 @@ extension Application {
                 do {
                     let stats1 = try await client.stats(id: container.id)
                     snapshots.append(StatsSnapshot(container: container, stats1: stats1, stats2: stats1))
+                // Flagged #2 (1 of 2): MEDIUM: `CancellationError` swallowed by catch-all in `collectStats` sampling loops, causing delayed cancellation and unnecessary API calls
+                // Both the first-sample loop (line 175) and the second-sample loop (line 194) inside `collectStats` used a bare `catch { continue }` that unconditionally swallowed all errors, including `CancellationError`. When the enclosing task was cancelled (e.g. via Ctrl+C triggering `group.cancelAll()`), async network calls such as `client.stats(id:)` throw `CancellationError` through Swift's cooperative cancellation mechanism. Because the catch-all discarded this error and `continue`d to the next iteration, the cancellation signal was silently lost. The loops would keep issuing `client.stats()` calls for every remaining container, and cancellation would not be detected until execution reached the explicit `Task.sleep(for: .seconds(2))` that follows the first-sample loop (or the equivalent sleep in `runStreaming`'s error handler), at which point `Task.sleep` would immediately throw and the error would finally propagate.
+                } catch is CancellationError {
+                    throw CancellationError()
                 } catch {
                     // Skip containers that error out
                     continue
@@ -191,6 +206,9 @@ extension Application {
                             stats1: snapshots[i].stats1,
                             stats2: stats2
                         )
+                    // Flagged #2 (2 of 2)
+                    } catch is CancellationError {
+                        throw CancellationError()
                     } catch {
                         // Keep the original stats if second sample fails
                         continue

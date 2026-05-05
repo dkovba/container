@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 19:18 — 0 critical, 1 high, 2 medium, 0 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -76,7 +77,10 @@ extension Application {
                 do {
                     images.append(try await ClientImage.get(reference: reference).description)
                 } catch {
-                    print("failed to get image for reference \(reference): \(error)")
+                    // Flagged #2: MEDIUM: Image-fetch error diagnostic written to stdout instead of stderr
+                    // When `ClientImage.get` fails for a reference, the error message is emitted via `print(...)`, which writes to stdout. In the stdout-streaming path (`output == nil`), stdout is expected to carry a binary tar archive; any text written there before the tar data corrupts the stream for downstream consumers.
+                    FileHandle.standardError.write(
+                        Data("failed to get image for reference \(reference): \(error)\n".utf8))
                 }
             }
 
@@ -112,11 +116,14 @@ extension Application {
                     try? FileManager.default.removeItem(at: tempFile)
                 }
 
-                guard FileManager.default.createFile(atPath: tempFile.path(), contents: nil) else {
+                // Flagged #3 (1 of 2): MEDIUM: Percent-encoded temp-file path causes file-not-found when streaming to stdout
+                // `URL.path()` is called with its default argument `percentEncoded: true`, which returns a percent-encoded string (e.g. `/private/var/folders/my%20dir/T/uuid.tar` when the temp directory path contains a space). That encoded string is passed verbatim to `FileManager.createFile(atPath:)` and to `ClientImage.save(out:)`, so the file is created and written at the literal percent-encoded path. Immediately afterward, `FileHandle(forReadingFrom: tempFile)` uses the URL directly; Foundation decodes the URL to the actual POSIX path. The two paths differ, so the `FileHandle` open fails with file-not-found and the save operation aborts with an internal error.
+                guard FileManager.default.createFile(atPath: tempFile.path(percentEncoded: false), contents: nil) else {
                     throw ContainerizationError(.internalError, message: "unable to create temporary file")
                 }
 
-                try await ClientImage.save(references: references, out: tempFile.path(), platform: p)
+                // Flagged #3 (2 of 2)
+                try await ClientImage.save(references: references, out: tempFile.path(percentEncoded: false), platform: p)
 
                 guard let fileHandle = try? FileHandle(forReadingFrom: tempFile) else {
                     throw ContainerizationError(.internalError, message: "unable to open temporary file for reading")
@@ -134,8 +141,12 @@ extension Application {
             }
 
             progress.finish()
-            for reference in references {
-                print(reference)
+            // Flagged #1: HIGH: `print(reference)` corrupts tar archive written to stdout
+            // After saving the archive, reference name strings are unconditionally printed to stdout via `print(reference)`. When `output == nil` (the user has not specified `--output` and the tar archive is being streamed to stdout), these strings are appended to the binary tar stream, producing malformed output that no tar reader can parse.
+            if output != nil {
+                for reference in references {
+                    print(reference)
+                }
             }
         }
     }

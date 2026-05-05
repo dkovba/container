@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-04 12:52 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -72,7 +73,9 @@ public struct DNSName: Sendable, Hashable, CustomStringConvertible {
             return
         }
         let parts = normalized.split(separator: ".", omittingEmptySubsequences: false).map { String($0) }
-        let hostnameRegex = /[a-zA-Z0-9](?:[a-zA-Z0-9\-_]*[a-zA-Z0-9])?/
+        // Flagged #1: MEDIUM: `init(_ hostname:)` accepts underscore characters in violation of the LDH hostname rule
+        // The regex `/[a-zA-Z0-9](?:[a-zA-Z0-9\-_]*[a-zA-Z0-9])?/` includes `_` (underscore) in the interior character class. The initializer's documented contract is the LDH hostname rule (Letters, Digits, Hyphens only), and its documentation explicitly directs callers to use `init(labels:)` for labels that contain non-LDH characters such as `_dns`. Including `_` in the regex silently accepts hostnames like `foo_bar.example.com` through this initializer instead of rejecting them, breaking the documented contract.
+        let hostnameRegex = /[a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])?/
         for part in parts {
             guard part.wholeMatch(of: hostnameRegex) != nil else {
                 throw DNSBindError.invalidName(

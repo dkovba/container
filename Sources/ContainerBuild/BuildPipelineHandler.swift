@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 11:33 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -111,8 +112,11 @@ public actor BuildPipeline {
         let stream = AsyncStream<Error> { continuation in
             let processTasks = Task {
                 let taskStream = await group.tasks()
+                // Flagged #1 (1 of 4): HIGH: `mainTask` success-path lifecycle broken — missing `group.continuation` finish and unconditional cancellation race
+                // `mainTask` had two interrelated defects on the success path. First, when `body(group)` completed successfully, `group.continuation` was never finished — so `processTasks` (which iterates `group.tasks()` backed by that continuation) blocked forever waiting for more items. Second, `mainTask`'s defer block unconditionally called `processTasks.cancel()` and `taskContinuation.finish()` on both success and error paths. On the success path `processTasks` may still be iterating group items and yielding wrapped tasks to `taskContinuation`; finishing `taskContinuation` prematurely causes subsequent yields inside `processTasks` to silently drop tasks, and cancelling `processTasks` prevents remaining group items from being dispatched at all.
                 defer {
                     continuation.finish()
+                    taskContinuation.finish()
                 }
                 for await item in taskStream {
                     try Task.checkCancellation()
@@ -132,17 +136,21 @@ public actor BuildPipeline {
             taskContinuation.yield(processTasks)
 
             let mainTask = Task { @Sendable in
+                // Flagged #1 (2 of 4)
                 defer {
                     continuation.finish()
-                    processTasks.cancel()
-                    taskContinuation.finish()
                 }
                 do {
                     try Task.checkCancellation()
                     try await body(group)
+                    // Flagged #1 (3 of 4)
+                    await group.continuation?.finish()
                 } catch {
                     continuation.yield(error)
                     await group.continuation?.finish()
+                    // Flagged #1 (4 of 4)
+                    processTasks.cancel()
+                    taskContinuation.finish()
                     throw error
                 }
             }

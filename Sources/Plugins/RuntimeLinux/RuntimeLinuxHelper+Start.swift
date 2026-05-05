@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-04 15:49 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -137,8 +138,9 @@ extension RuntimeLinuxHelper {
             guard getrlimit(RLIMIT_NOFILE, &limits) == 0 else {
                 throw POSIXError(.init(rawValue: errno)!)
             }
-            limits.rlim_cur = 65536
-            limits.rlim_max = 65536
+            // Flagged #1: HIGH: `adjustLimits()` unconditionally overwrites the hard file-descriptor limit
+            // `limits.rlim_max = 65536` attempts to set the hard limit for `RLIMIT_NOFILE` to 65536 regardless of the process's current hard limit. A non-root process cannot raise its hard limit: if the current `rlim_max` is below 65536 the subsequent `setrlimit` call fails with `EPERM`, causing `adjustLimits()` to throw and the helper to exit immediately at startup before serving any requests. Additionally, `limits.rlim_cur = 65536` following an unchanged (possibly lower) `rlim_max` would produce `EINVAL` on the same `setrlimit` call because the soft limit must not exceed the hard limit.
+            limits.rlim_cur = min(65536, limits.rlim_max)
             guard setrlimit(RLIMIT_NOFILE, &limits) == 0 else {
                 throw POSIXError(.init(rawValue: errno)!)
             }

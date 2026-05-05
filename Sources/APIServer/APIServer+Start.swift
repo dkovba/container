@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-04 17:44 — 0 critical, 3 high, 0 medium, 0 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -93,6 +94,9 @@ extension APIServer {
                             $0[$1.key.rawValue] = $1.value
                         }), log: log)
 
+                // Flagged #3 (1 of 3): HIGH: Incomplete control flow after `group.cancelAll()` causes spurious logs and silent crash exit
+                // After `group.cancelAll()` is called in the `.failure` branch of the `for await result in group` loop, there is no `return` — execution falls through and the loop continues iterating. The two remaining tasks, cancelled by `group.cancelAll()`, each return `.failure(CancellationError())`. The loop handles these cancellation results identically to genuine failures: it logs "API server task failed" and calls `group.cancelAll()` again (a no-op). Once all results are drained and `withTaskGroup` returns, `run()` completes normally without throwing — `APIServer.exit(withError:)` is only reachable via the surrounding `catch` block, which only catches errors thrown during service initialization. A runtime failure of the XPC server or either DNS server therefore causes the process to exit with code 0, indistinguishable from a clean shutdown.
+                var taskError: Error? = nil
                 await withTaskGroup(of: Result<Void, Error>.self) { group in
                     group.addTask {
                         log.info("starting XPC server")
@@ -131,7 +135,9 @@ extension APIServer {
                     group.addTask {
                         do {
                             let localhostResolver = LocalhostDNSHandler(log: log)
-                            await localhostResolver.monitorResolvers()
+                            // Flagged #1: HIGH: `monitorResolvers()` blocks localhost DNS server from ever starting
+                            // `await localhostResolver.monitorResolvers()` is called inline inside the `group.addTask` closure before `dnsServer.run()`. `monitorResolvers()` calls `await self.watcher.startWatching(...)`, which is a long-running directory-watch loop that never returns under normal operation. Because the `await` suspends the task until `monitorResolvers()` completes, execution never reaches `dnsServer.run()`, so the localhost DNS server silently never starts.
+                            Task { await localhostResolver.monitorResolvers() }
 
                             let nxDomainResolver = NxDomainResolver()
                             let compositeResolver = CompositeResolver(handlers: [localhostResolver, nxDomainResolver])
@@ -157,8 +163,18 @@ extension APIServer {
                             continue
                         case .failure(let error):
                             log.error("API server task failed: \(error)")
+                            // Flagged #3 (2 of 3)
+                            taskError = error
+                            // Flagged #2: HIGH: Task group hangs indefinitely when any server task fails
+                            // Inside the `withTaskGroup` closure, the `for await result in group` loop handles a `.failure` result by logging the error but never calling `group.cancelAll()`. All three tasks (XPC server, container DNS server, localhost DNS server) are long-running and only terminate when cancelled. If any one of them fails and returns `.failure`, the loop logs the error and then resumes waiting — but the remaining tasks never finish on their own, so the `for await` loop blocks forever and the process never exits.
+                            group.cancelAll()
+                            return
                         }
                     }
+                }
+                // Flagged #3 (3 of 3)
+                if let error = taskError, !(error is CancellationError) {
+                    throw error
                 }
             } catch {
                 log.error(

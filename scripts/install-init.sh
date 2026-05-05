@@ -1,4 +1,5 @@
 #! /bin/bash -e
+# fix-bugs: 2026-05-09 18:47 — 0 critical, 1 high, 1 medium, 0 low (2 total)
 # Copyright © 2025-2026 Apple Inc. and the container project authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,7 +26,9 @@ Options:
     -h, --help                 Show this help message
 
 EOF
-    exit 0
+    # Flagged #2 (1 of 4): MEDIUM: `usage()` always exits 0, masking argument errors
+    # `usage()` unconditionally calls `exit 0`. When `usage` is invoked after printing an error (invalid or missing argument), the script exits successfully, hiding the failure from callers and any wrapping automation that checks the exit code.
+    exit "${1:-0}"
 }
 
 # Parse command line options
@@ -35,7 +38,8 @@ while [[ $# -gt 0 ]]; do
         -a|--app-root)
             if [[ -z "$2" || "$2" == -* ]]; then
                 echo "Option $1 requires an argument." >&2
-                usage
+                # Flagged #2 (2 of 4)
+                usage 1
             fi
             START_ARGS+=(--app-root "$2")
             shift 2
@@ -43,7 +47,8 @@ while [[ $# -gt 0 ]]; do
         -l|--log-root)
             if [[ -z "$2" || "$2" == -* ]]; then
                 echo "Option $1 requires an argument." >&2
-                usage
+                # Flagged #2 (3 of 4)
+                usage 1
             fi
             START_ARGS+=(--log-root "$2")
             shift 2
@@ -53,7 +58,8 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Invalid option: $1" >&2
-            usage
+            # Flagged #2 (4 of 4)
+            usage 1
             ;;
     esac
 done
@@ -69,8 +75,10 @@ if [ "${CONTAINERIZATION_VERSION}" == "unspecified" ] ; then
 		exit 1
 	fi
 	echo "Creating InitImage"
-	make -C ${CONTAINERIZATION_PATH} init
-	${CONTAINERIZATION_PATH}/bin/cctl images save -o /tmp/init.tar ${IMAGE_NAME}
+	# Flagged #1: HIGH: Unquoted variables cause word-splitting in `make` and `cctl images save`
+	# Three variables are left unquoted across two lines. On line 72, `make -C ${CONTAINERIZATION_PATH} init` leaves `$CONTAINERIZATION_PATH` unquoted: bash word-splits the path so the portion before the first space is used as the `-C` argument and the remainder becomes spurious make targets. On line 73, `${CONTAINERIZATION_PATH}/bin/cctl images save -o /tmp/init.tar ${IMAGE_NAME}` is unquoted in two places: `$CONTAINERIZATION_PATH` again breaks the executable path so the command is not found, and `$IMAGE_NAME` is subject to word-splitting and pathname globbing so an image name with spaces or glob metacharacters (`*`, `?`, `[`) is passed to `cctl` as multiple garbled arguments.
+	make -C "${CONTAINERIZATION_PATH}" init
+	"${CONTAINERIZATION_PATH}/bin/cctl" images save -o /tmp/init.tar "${IMAGE_NAME}"
 
 	# Sleep because commands after stop and start are racy.
 	bin/container system stop

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 18:27 — 0 critical, 1 high, 1 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -16,6 +17,9 @@
 
 import ArgumentParser
 import ContainerAPIClient
+// Flagged #1 (1 of 2): HIGH: `prune` deletes infrastructure images
+// `ClientImage.list()` returns all images including internal infrastructure images, but `ImagePrune` applied no filter to exclude them. Both `ImageDelete` and `ImageList` guard against this with `Utility.isInfraImage(name:)`, but `ImagePrune` did not, so every code path (dangling-only and `--all`) could select and delete infra images.
+import Containerization
 import ContainerizationOCI
 import Foundation
 
@@ -33,7 +37,8 @@ extension Application {
         var all: Bool = false
 
         public func run() async throws {
-            let allImages = try await ClientImage.list()
+            // Flagged #1 (2 of 2)
+            let allImages = try await ClientImage.list().filter { !Utility.isInfraImage(name: $0.reference) }
 
             let imagesToPrune: [ClientImage]
             if all {
@@ -72,8 +77,10 @@ extension Application {
 
             let (deletedDigests, size) = try await ClientImage.cleanUpOrphanedBlobs()
 
-            for image in imagesToPrune {
-                print("untagged \(image.reference)")
+            // Flagged #2: MEDIUM: `prune` reports untagged output for images that failed deletion
+            // The output loop iterated over `imagesToPrune` (all images selected for pruning) instead of `prunedImages` (images successfully deleted). Any image whose `ClientImage.delete` call threw an error was still printed as "untagged" even though it was never removed.
+            for image in prunedImages {
+                print("untagged \(image)")
             }
             for digest in deletedDigests {
                 print("deleted \(digest)")

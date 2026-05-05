@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 10:54 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -337,7 +338,9 @@ actor BuildFSSync: BuildPipelineHandler {
             if path.isSymlink {
                 let target: URL = path.resolvingSymlinksInPath()
                 if contextDir.parentOf(target) {
-                    self.target = target.relativePathFrom(from: path)
+                    // Flagged #1: HIGH: `FileInfo.init` computes incorrect relative symlink target path
+                    // `target.relativePathFrom(from: path)` uses the symlink file itself as the base for relative path computation. Since `relativePathFrom(from:)` counts every component of `base` (including the filename) when calculating `..` levels, this produces an extra `../` prefix. Symlink targets are resolved by the filesystem relative to the directory containing the symlink, not relative to the symlink file path itself.
+                    self.target = target.relativePathFrom(from: path.deletingLastPathComponent())
                 } else {
                     self.target = target.cleanPath
                 }

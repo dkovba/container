@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 04:31 — 0 critical, 0 high, 0 medium, 1 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -362,8 +363,10 @@ class TestCLIVolumes: CLITest {
             throw CLIError.executionFailed("volume prune failed: \(error)")
         }
 
-        #expect(output.contains(volumeName1) || !output.contains("No volumes to prune"), "should prune volume1")
-        #expect(output.contains(volumeName2) || !output.contains("No volumes to prune"), "should prune volume2")
+        // Flagged #1: LOW: `testVolumePruneUnusedVolumes` assertions are tautological and never fail
+        // The two `#expect` assertions used `||` with `!output.contains("No volumes to prune")` as a second clause. The `volume prune` implementation (`VolumePrune.swift`) never emits the string `"No volumes to prune"` — it always ends output with `"Reclaimed \(freed) in disk space"`. Because that second clause is unconditionally `true`, the full `A || true` expression is always `true` regardless of whether `A` holds, making both assertions pass even when neither `volumeName1` nor `volumeName2` appeared in the prune output (i.e., when the volumes were not actually pruned).
+        #expect(output.contains(volumeName1), "should prune volume1")
+        #expect(output.contains(volumeName2), "should prune volume2")
         #expect(output.contains("Reclaimed"), "should show reclaimed space")
 
         // Verify volumes are gone

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 06:02 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -58,7 +59,9 @@ extension Application {
                 showTasks: true,
                 showItems: true,
                 ignoreSmallSize: true,
-                totalTasks: 3
+                // Flagged #1: MEDIUM: `ContainerCreate` reports incorrect total task count in progress bar
+                // `totalTasks: 3` was passed to the progress configuration, but `Utility.containerConfigFromFlags` drives exactly five named progress phases: "Fetching image", "Unpacking image", "Fetching kernel", "Fetching init image", and "Unpacking init image". With a declared total of 3 the progress bar displays counts such as "[4/3]" and "[5/3]" for the final two phases, which is visually nonsensical and misleading. The correct value of 5 is confirmed by the analogous `ContainerRun` command, which passes `totalTasks: 6` for those same five phases plus its additional "Starting container" phase.
+                totalTasks: 5
             )
             let progress = ProgressBar(config: progressConfig)
             defer {

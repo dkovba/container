@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-30 13:01 — 0 critical, 0 high, 1 medium, 1 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -199,7 +200,9 @@ class TestCLIImagesCommand: CLITest {
             let defaultDomain = "ghcr.io"
             let imageName = "linuxcontainers/alpine:3.20"
             defer {
-                try? doDefaultRegistrySet(domain: "docker.io")
+                // Flagged #1: MEDIUM: `testImageDefaultRegistry` cleanup sets registry instead of clearing it
+                // The `defer` block calls `doDefaultRegistrySet(domain: "docker.io")` to restore state after the test, but the original state is an unset registry property, not one explicitly set to `docker.io`. Using `set` instead of `clear` leaves the `registry.domain` property in a different state than it was before the test, which can pollute subsequent tests that depend on the default registry being unset.
+                try? doDefaultRegistryUnset()
             }
             try doDefaultRegistrySet(domain: defaultDomain)
             try doPull(imageName: imageName, args: ["--platform", "linux/arm64"])
@@ -220,7 +223,9 @@ class TestCLIImagesCommand: CLITest {
             #expect(listOutput.contains("username/image-name:mytag"))
             #expect(listOutput.contains(imageName))
         } catch {
-            Issue.record("failed default registry test")
+            // Flagged #2: LOW: `testImageDefaultRegistry` catch block omits error details
+            // The catch block calls `Issue.record("failed default registry test")` without interpolating the caught `error`. Every other catch block in the file includes `\(error)` in the message to provide diagnostic context.
+            Issue.record("failed default registry test \(error)")
             return
         }
     }

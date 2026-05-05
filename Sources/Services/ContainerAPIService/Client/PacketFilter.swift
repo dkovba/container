@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 20:55 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -55,7 +56,9 @@ public struct PacketFilter {
         }
 
         var lines = content.components(separatedBy: .newlines)
-        if !content.contains(redirectRule) {
+        // Flagged #1 (1 of 3): MEDIUM: `content.contains()` substring match used instead of exact line match
+        // Two call sites use `content.contains(...)` to check whether a line is already present in a file, but this performs a substring search on the entire file content rather than matching individual lines. The most severe manifestation is in `addAnchorToConfig` (line 121): when `anchorText` is `anchor "com.apple.container"`, it falsely matches against any already-present line like `scrub-anchor "com.apple.container"`, `rdr-anchor "com.apple.container"`, etc., because the string `anchor "com.apple.container"` is a literal substring of every `*-anchor "com.apple.container"` variant. The same pattern at line 58 can skip inserting a redirect rule whose text is a prefix of an existing longer line (e.g., domain `example.com` matching a line for `example.com.au` with the same IPs).
+        if !lines.contains(redirectRule) {
             lines.insert(redirectRule, at: lines.endIndex - 1)
         }
 
@@ -118,7 +121,8 @@ public struct PacketFilter {
         for (i, keyword) in anchorKeywords[..<(anchorKeywords.endIndex - 1)].enumerated() {
             let anchorText = "\(keyword) \"\(Self.anchor)\""
 
-            if content.contains(anchorText) {
+            // Flagged #1 (2 of 3)
+            if lines.contains(anchorText) {
                 continue
             }
 
@@ -128,7 +132,8 @@ public struct PacketFilter {
             lines.insert(anchorText, at: idx ?? lines.endIndex - 1)
         }
 
-        if !content.contains(loadAnchorText) {
+        // Flagged #1 (3 of 3)
+        if !lines.contains(loadAnchorText) {
             lines.insert(loadAnchorText, at: lines.endIndex - 1)
         }
 

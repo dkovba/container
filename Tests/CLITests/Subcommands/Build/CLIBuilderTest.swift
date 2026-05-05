@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 20:33 — 0 critical, 0 high, 3 medium, 0 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -81,9 +82,11 @@ extension TestCLIBuildBase {
             #expect(try self.inspectImage(imageName) == imageName, "expected to have successfully built \(imageName)")
 
             let newTempDir: URL = try createTempDir()
+            // Flagged #1: MEDIUM: Spurious leading space in Dockerfile `FROM` instruction in `testBuildFromLocalImage`
+            // The multiline string literal for `newDockerfile` had an extra leading space before the `FROM` instruction (` FROM \(imageName)` instead of `FROM \(imageName)`). Swift multiline string literals strip indentation up to the closing `"""` delimiter; the content line was indented one column beyond that baseline, producing a Dockerfile whose sole instruction starts with a space.
             let newDockerfile: String =
                 """
-                 FROM \(imageName)
+                FROM \(imageName)
                 """
             let newContext: [FileSystemEntry] = []
             try createContext(tempDir: newTempDir, dockerfile: newDockerfile, context: newContext)
@@ -364,7 +367,9 @@ extension TestCLIBuildBase {
                 .directory("Test2Source"),
                 .directory("Test2Source2"),
                 .file("Test2Source/Test/Test/test.yaml", content: .zeroFilled(size: 300)),
-                .symbolicLink("Test2Source2/Test/test.yaml", target: "Test2Source/Test/Test/test.yaml"),
+                // Flagged #2: MEDIUM: Symlink filename does not match Dockerfile reference in `testBuildSymlink` test 2
+                // The Dockerfile for test 2 runs `RUN cat Test2Source2/Test/test.txt`, but the symlink was created as `Test2Source2/Test/test.yaml`. The extension mismatch means the file the Dockerfile tries to read does not exist.
+                .symbolicLink("Test2Source2/Test/test.txt", target: "Test2Source/Test/Test/test.yaml"),
 
                 // test 3
                 .directory("Test3Source/Source"),
@@ -956,7 +961,9 @@ extension TestCLIBuildBase {
                 throw CLIError.executionFailed("build failed: stdout=\(response.output) stderr=\(response.error)")
             }
 
-            let containerName = "dockerignore-ignored-dockerfile"
+            // Flagged #3: MEDIUM: Non-unique container name in `testDockerIgnoreIgnoredDockerfile` causes flaky failures
+            // The container name `"dockerignore-ignored-dockerfile"` was a static string with no UUID suffix. Every other dockerignore test in the file (`testDockerIgnoreBasic`, `testDockerIgnoreDockerfileSpecific`, `testDockerIgnoreOutsideContext`, `testDockerIgnoreSubdirDockerfile`, etc.) appends `UUID().uuidString` to the container name to guarantee uniqueness across runs. Without the suffix, if a previous test run was interrupted after `doLongRun` but before the `defer { try? self.doStop(...) }` cleanup executed, the stale container would still exist, and the next invocation of `doLongRun(name:image:)` with the same static name would fail.
+            let containerName = "dockerignore-ignored-dockerfile-\(UUID().uuidString)"
             try self.doLongRun(name: containerName, image: imageName)
             defer { try? self.doStop(name: containerName) }
 

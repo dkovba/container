@@ -1,10 +1,13 @@
+# fix-bugs: 2026-05-04 14:11 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 abstract = "Core image management plugin"
 author = "Apple"
 version = 0.1
 
 [servicesConfig]
 loadAtBoot = true
-runAtLoad = false
+# Flagged #1: HIGH: `runAtLoad = false` prevents core image service from starting at boot
+# `runAtLoad` was set to `false` for a `core`-type plugin with `loadAtBoot = true`. The launchd plist generated from this config sets `RunAtLoad = false`, so the `container-core-images` XPC daemon is registered with launchd when the API server starts but its process is never launched until the first on-demand XPC connection arrives. This leaves a window — between API server startup and the first client request — during which the image service is unavailable, contrary to the intended singleton-always-running semantics of a core plugin.
+runAtLoad = true
 defaultArguments = []
 
 [[servicesConfig.services]]

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 19:52 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -16,6 +17,9 @@
 
 import ArgumentParser
 import ContainerAPIClient
+// Flagged #1 (1 of 2): MEDIUM: `NetworkInspect.run()` silently ignores unknown network IDs
+// `networkClient.list()` fetches all networks and the result is filtered client-side with `networks.contains($0.id)`. Any ID that does not match an existing network is silently dropped, so the command exits with status 0 and returns an empty or partial JSON array instead of reporting an error.
+import ContainerizationError
 import Foundation
 import SwiftProtobuf
 
@@ -39,6 +43,11 @@ extension Application {
                 networks.contains($0.id)
             }.map {
                 PrintableNetwork($0)
+            }
+            // Flagged #1 (2 of 2)
+            let foundIds = Set(items.map { $0.id })
+            if let missing = networks.first(where: { !foundIds.contains($0) }) {
+                throw ContainerizationError(.notFound, message: "network \(missing) not found")
             }
             try Output.emit(Output.renderJSON(items))
         }

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-06 14:38 — 0 critical, 1 high, 5 medium, 0 low (6 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -141,10 +142,11 @@ extension XPCMessage {
 
     public func set(key: String, value: Data) {
         value.withUnsafeBytes { ptr in
-            if let addr = ptr.baseAddress {
-                lock.withLock {
-                    xpc_dictionary_set_data(self.object, key, addr, value.count)
-                }
+            // Flagged #6: MEDIUM: `set(key:value:Data)` silently fails to store empty `Data`
+            // `value.withUnsafeBytes` yields a buffer pointer whose `baseAddress` is nil when `value` is empty.
+            let addr = ptr.baseAddress ?? UnsafeRawPointer(bitPattern: 1)!
+            lock.withLock {
+                xpc_dictionary_set_data(self.object, key, addr, value.count)
             }
         }
     }
@@ -221,13 +223,24 @@ extension XPCMessage {
         }
         if let fd {
             let fd2 = xpc_fd_dup(fd)
-            return FileHandle(fileDescriptor: fd2, closeOnDealloc: false)
+            // Flagged #3: MEDIUM: `fileHandle(key:)` returns invalid FileHandle when `xpc_fd_dup` fails
+            // `xpc_fd_dup` returns -1 on failure, but the code unconditionally wraps the result in a `FileHandle` without checking for -1.
+            if fd2 == -1 {
+                return nil
+            }
+            // Flagged #1 (1 of 2): HIGH: `fileHandle(key:)` and `fileHandles(key:)` leak duplicated file descriptors
+            // `xpc_fd_dup` and `xpc_array_dup_fd` create new file descriptors, but the returned `FileHandle` instances are constructed with `closeOnDealloc: false`, so the duplicated fds are never closed.
+            return FileHandle(fileDescriptor: fd2, closeOnDealloc: true)
         }
         return nil
     }
 
     public func set(key: String, value: FileHandle) {
-        let fd = xpc_fd_create(value.fileDescriptor)
+        // Flagged #4: MEDIUM: `set(key:value:FileHandle)` crashes when `xpc_fd_create` returns nil
+        // `xpc_fd_create` can return nil when given an invalid file descriptor, but the return value is used without a nil check.
+        guard let fd = xpc_fd_create(value.fileDescriptor) else {
+            return
+        }
         close(value.fileDescriptor)
         lock.withLock {
             xpc_dictionary_set_value(self.object, key, fd)
@@ -242,11 +255,16 @@ extension XPCMessage {
             let fd1 = xpc_array_dup_fd(fds, 0)
             let fd2 = xpc_array_dup_fd(fds, 1)
             if fd1 == -1 || fd2 == -1 {
+                // Flagged #2: MEDIUM: `fileHandles(key:)` leaks fd on partial dup failure
+                // When one `xpc_array_dup_fd` succeeds but the other returns -1, the function returns `nil` without closing the successfully duplicated fd.
+                if fd1 != -1 { close(fd1) }
+                if fd2 != -1 { close(fd2) }
                 return nil
             }
+            // Flagged #1 (2 of 2)
             return [
-                FileHandle(fileDescriptor: fd1, closeOnDealloc: false),
-                FileHandle(fileDescriptor: fd2, closeOnDealloc: false),
+                FileHandle(fileDescriptor: fd1, closeOnDealloc: true),
+                FileHandle(fileDescriptor: fd2, closeOnDealloc: true),
             ]
         }
         return nil
@@ -262,6 +280,10 @@ extension XPCMessage {
                 )
             }
             xpc_array_append_value(fdArray, xpcFd)
+        }
+        // Flagged #5: MEDIUM: `set(key:value:[FileHandle])` closes file descriptors of earlier handles on partial failure
+        // In the loop that creates XPC fd objects from an array of FileHandles, `close(fh.fileDescriptor)` is called immediately after each successful `xpc_fd_create`.
+        for fh in value {
             close(fh.fileDescriptor)
         }
         lock.withLock {

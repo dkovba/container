@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 15:00 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -44,7 +45,9 @@ public struct StderrLogHandler: LogHandler {
         line: UInt
     ) {
         let data: Data
-        switch logLevel {
+        // Flagged #1: MEDIUM: `log()` switches on handler threshold instead of message level
+        // `switch logLevel` uses the handler's configured log level threshold (the `logLevel` property) instead of the `level` parameter passed to the method. This means the format decision (whether to include a timestamp) is based on how the handler is configured, not the severity of the individual log message being emitted.
+        switch level {
         case .debug, .trace:
             let timestamp = isoTimestamp()
             if let metadata, !metadata.isEmpty {

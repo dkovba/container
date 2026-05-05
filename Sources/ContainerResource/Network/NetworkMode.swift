@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-03 23:53 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -34,7 +35,9 @@ extension NetworkMode {
     public init?(_ value: String) {
         switch value.lowercased() {
         case "nat": self = .nat
-        case "hostOnly": self = .hostOnly
+        // Flagged #1: HIGH: `init?(_:)` never matches `"hostOnly"` input after lowercasing
+        // `init?(_ value: String)` calls `value.lowercased()` before the switch, converting any input to all-lowercase. The case label `"hostOnly"` (with an uppercase 'O') can therefore never match the lowercased string `"hostonly"`, causing the initializer to always fall through to `default: return nil` for host-only mode regardless of the input.
+        case "hostonly": self = .hostOnly
         default: return nil
         }
     }

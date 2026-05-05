@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 12:19 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -255,6 +256,23 @@ struct PluginLoaderTest {
         let programArguments = plist["ProgramArguments"] as! [String]
 
         #expect(!programArguments.contains("--debug"))
+    }
+
+    @Test
+    func testAlterCLIHelpTextPreservesBlankLines() async throws {
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+        let factory = try setupMock(tempURL: tempURL)
+        let loader = try PluginLoader(
+            appRoot: tempURL,
+            installRoot: URL(filePath: "/usr/local/"),
+            logRoot: nil,
+            pluginDirectories: [tempURL],
+            pluginFactories: [factory]
+        )
+        let original = "USAGE: container [options]\n\nOPTIONS:\n  --help   Show help"
+        let result = loader.alterCLIHelpText(original: original)
+        #expect(result.hasPrefix("USAGE: container [options]\n\nOPTIONS:"))
     }
 
     private func setupMock(tempURL: URL) throws -> MockPluginFactory {

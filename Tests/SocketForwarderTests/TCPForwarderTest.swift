@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 16:45 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //

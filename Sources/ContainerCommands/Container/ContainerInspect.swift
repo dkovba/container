@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 07:04 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -17,6 +18,9 @@
 import ArgumentParser
 import ContainerAPIClient
 import ContainerResource
+// Flagged #1 (1 of 2): MEDIUM: `ContainerInspect.run()` silently ignores unknown container IDs
+// `client.list()` fetches all containers and the result is filtered client-side with `containerIds.contains($0.id)`. Any ID that does not match an existing container is silently dropped, so the command exits with status 0 and returns an empty or partial JSON array instead of reporting an error.
+import ContainerizationError
 import Foundation
 import SwiftProtobuf
 
@@ -40,6 +44,11 @@ extension Application {
                 containerIds.contains($0.id)
             }.map {
                 PrintableContainer($0)
+            }
+            // Flagged #1 (2 of 2)
+            let foundIds = Set(containers.map { $0.configuration.id })
+            if let missing = containerIds.first(where: { !foundIds.contains($0) }) {
+                throw ContainerizationError(.notFound, message: "container \(missing) not found")
             }
             try Output.emit(Output.renderJSON(containers))
         }

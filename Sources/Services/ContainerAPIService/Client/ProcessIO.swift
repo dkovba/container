@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 21:21 — 0 critical, 0 high, 2 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -325,7 +326,14 @@ public struct OSFile: Sendable {
                 buffer.count - bytesWrote
             )
             if n == -1 {
-                if errno == EAGAIN || errno == EIO {
+                // Flagged #2 (1 of 2): MEDIUM: `OSFile.read()` and `OSFile.write()` treat EINTR as a fatal error
+                // Neither `read()` nor `write()` handle `EINTR`. When a system call is interrupted by a signal, `errno` is set to `EINTR` and the call returns -1.
+                if errno == EINTR {
+                    continue
+                }
+                // Flagged #1 (1 of 2): MEDIUM: `OSFile.read()` and `OSFile.write()` misclassify EIO as EAGAIN
+                // The error-handling condition `errno == EAGAIN || errno == EIO` in both `read()` and `write()` incorrectly treats `EIO` (a fatal I/O error) as `.again`.
+                if errno == EAGAIN {
                     return (bytesWrote, .again)
                 }
                 return (bytesWrote, .error(errno))
@@ -356,7 +364,12 @@ public struct OSFile: Sendable {
                 buffer.count - bytesRead
             )
             if n == -1 {
-                if errno == EAGAIN || errno == EIO {
+                // Flagged #2 (2 of 2)
+                if errno == EINTR {
+                    continue
+                }
+                // Flagged #1 (2 of 2)
+                if errno == EAGAIN {
                     return (bytesRead, .again)
                 }
                 return (bytesRead, .error(errno))

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 16:28 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -40,7 +41,9 @@ public actor NetworkService: Sendable {
 
         let subnet = status.ipv4Subnet
 
-        let size = Int(subnet.upper.value - subnet.lower.value - 3)
+        // Flagged #1: MEDIUM: Off-by-one in allocator size excludes last usable IP address
+        // The allocator size was computed as `subnet.upper.value - subnet.lower.value - 3`, which is one fewer than the correct number of allocatable addresses. Three addresses are reserved (network address at `lower`, gateway at `lower + 1`, broadcast at `upper`), so the allocatable count out of the total `upper - lower + 1` addresses is `upper - lower - 2`. The subtraction of 3 instead of 2 caused the allocator range to end at `upper - 2`, permanently excluding the last valid host address (`upper - 1`, the address immediately before broadcast) from ever being allocated.
+        let size = Int(subnet.upper.value - subnet.lower.value - 2)
         self.allocator = try AttachmentAllocator(lower: subnet.lower.value + 2, size: size)
         self.macAddresses = [:]
         self.network = network

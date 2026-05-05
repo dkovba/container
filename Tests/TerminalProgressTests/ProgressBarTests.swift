@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 17:43 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -413,8 +414,10 @@ final class ProgressBarTests: XCTestCase {
             totalItems: 1
         )
         let progress = ProgressBar(config: config)
-        progress.set(items: 1)
+        // Flagged #1 (1 of 2): HIGH: `testTotalItemsAdd` and `testTotalItemsSet` trigger premature auto-finish before updating total
+        // In both `testTotalItemsAdd` and `testTotalItemsSet`, `progress.set(items: 1)` was called while `totalItems` was still `1` (the initial config value). The fixed source's `checkIfFinished()` uses a `>=` comparison, so `items(1) >= totalItems(1)` immediately triggered `finish()`. The subsequent call to update the total (`progress.add(totalItems: 1)` or `progress.set(totalItems: 2)`) had no effect because the bar was already finished, causing `draw()` to return a finished state (`"✔ Task 100% (2 it) [0s]"`) instead of the expected in-progress output (`"⠋ Task 50% (1 of 2 it) [0s]"`).
         progress.add(totalItems: 1)
+        progress.set(items: 1)
         let output = progress.draw()
         XCTAssertEqual(output, "⠋ Task 50% (1 of 2 it) [0s]")
     }
@@ -426,8 +429,9 @@ final class ProgressBarTests: XCTestCase {
             totalItems: 1
         )
         let progress = ProgressBar(config: config)
-        progress.set(items: 1)
+        // Flagged #1 (2 of 2)
         progress.set(totalItems: 2)
+        progress.set(items: 1)
         let output = progress.draw()
         XCTAssertEqual(output, "⠋ Task 50% (1 of 2 it) [0s]")
     }

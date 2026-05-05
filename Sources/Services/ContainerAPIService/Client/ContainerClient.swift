@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 19:39 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -248,6 +249,10 @@ public struct ContainerClient: Sendable {
 
             try await xpcClient.send(request)
             return ClientProcessImpl(containerId: containerId, processId: processId, xpcClient: xpcClient)
+        // Flagged #1: MEDIUM: `createProcess()` rewraps `.invalidArgument` as `.internalError`
+        // The stdio validation switch throws `.invalidArgument` inside the `do` block, but the generic `catch` re-wraps it as `.internalError`, changing the error code.
+        } catch let error as ContainerizationError {
+            throw error
         } catch {
             throw ContainerizationError(
                 .internalError,

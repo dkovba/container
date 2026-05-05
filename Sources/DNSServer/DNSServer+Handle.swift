@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-06 15:44 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -59,17 +60,12 @@ extension DNSServer {
                 ?? Message(
                     id: query.id,
                     type: .response,
-                    returnCode: .notImplemented,
+                    // Flagged #1: HIGH: `handle()` NXDOMAIN override incorrectly replaces handler's explicit return codes
+                    // The nil-coalescing fallback used `returnCode: .notImplemented`, and a subsequent `if response.answers.isEmpty && response.returnCode != .noError` override changed it to `.nonExistentDomain`. This override also fired for explicit handler responses (e.g. `.notImplemented` from `HostTableResolver` for unsupported query types, or `.formatError` from `StandardQueryValidator`), incorrectly telling clients the domain does not exist when it does.
+                    returnCode: .nonExistentDomain,
                     questions: query.questions,
                     answers: []
                 )
-
-            // Only set NXDOMAIN if handler didn't explicitly set noError (NODATA response).
-            // This preserves NODATA responses for AAAA queries when A record exists,
-            // which prevents musl libc from treating empty AAAA as "domain doesn't exist".
-            if response.answers.isEmpty && response.returnCode != .noError {
-                response.returnCode = .nonExistentDomain
-            }
 
             self.log?.debug("serializing response")
             responseData = try response.serialize()

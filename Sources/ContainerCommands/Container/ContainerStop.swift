@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 17:07 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -60,7 +61,9 @@ extension Application {
 
             let containers: [String]
             if self.all {
-                containers = try await client.list().map { $0.id }
+                // Flagged #1: MEDIUM: `--all` flag stops non-running containers instead of only running ones
+                // When `--all` is passed, `client.list()` returns every container regardless of state. The resulting IDs are then passed to `stopContainers`, so the command attempts to stop containers that are already stopped or in other non-running states. `ContainerKill --all` correctly filters to running containers via `ContainerListFilters(status: .running)`, but `ContainerStop --all` did not apply the same filter.
+                containers = try await client.list(filters: ContainerListFilters(status: .running)).map { $0.id }
             } else {
                 containers = containerIds
             }

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 04:00 — 1 critical, 1 high, 2 medium, 0 low (4 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -38,6 +39,13 @@ struct UtilityTests {
         #expect(result["standalone"] == "")
     }
 
+    @Test("Parse key with empty value")
+    func testKeyWithEmptyValue() {
+        let result = Utility.parseKeyValuePairs(["key="])
+
+        #expect(result["key"] == "")
+    }
+
     @Test("Parse empty input")
     func testEmptyInput() {
         let result = Utility.parseKeyValuePairs([])
@@ -52,6 +60,13 @@ struct UtilityTests {
         #expect(result["key1"] == "value1")
         #expect(result["standalone"] == "")
         #expect(result["key2"] == "value2")
+    }
+
+    @Test("Valid entity name single character")
+    func testValidEntityNameSingleCharacter() throws {
+        try Utility.validEntityName("a")
+        try Utility.validEntityName("Z")
+        try Utility.validEntityName("9")
     }
 
     @Test("Valid MAC address with colons")
@@ -107,5 +122,22 @@ struct UtilityTests {
         #expect(ports[1].containerPort == 9000)
         #expect(ports[1].proto == .udp)
         #expect(ports[1].count == 100)
+    }
+
+    @Test("hasOverlaps allows same port on different host addresses")
+    func testHasOverlapsDifferentAddresses() throws {
+        let ports = try Parser.publishPorts([
+            "127.0.0.1:8080:9000/tcp",
+            "192.168.1.1:8080:9001/tcp",
+        ])
+        #expect(ports.hasOverlaps() == false)
+    }
+
+    @Test("hasOverlaps handles port range near UInt16 max without overflow")
+    func testHasOverlapsHighPortRange() throws {
+        let ports = try Parser.publishPorts([
+            "0.0.0.0:65534-65535:9000-9001/tcp",
+        ])
+        #expect(ports.hasOverlaps() == false)
     }
 }

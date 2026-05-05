@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-06 18:24 — 0 critical, 2 high, 0 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -65,17 +66,19 @@ extension ProgressBar {
 
         var finished = true
         var defined = false
+        // Flagged #1: HIGH: `checkIfFinished()` never triggers completion when counters overshoot their totals
+        // `checkIfFinished()` compared `state.tasks == totalTasks`, `state.items == totalItems`, and `state.size == totalSize` using strict equality. If any counter exceeds its total (e.g., a network chunk pushes `size` past `totalSize`, or concurrent updates increment `items` beyond `totalItems`), the equality check never matches and `finish()` is never called.
         if let totalTasks = state.totalTasks, totalTasks > 0 {
             // For tasks, we're showing the current task rather than the number of completed tasks.
-            finished = finished && state.tasks == totalTasks
+            finished = finished && state.tasks >= totalTasks
             defined = true
         }
         if let totalItems = state.totalItems, totalItems > 0 {
-            finished = finished && state.items == totalItems
+            finished = finished && state.items >= totalItems
             defined = true
         }
         if let totalSize = state.totalSize, totalSize > 0 {
-            finished = finished && state.size == totalSize
+            finished = finished && state.size >= totalSize
             defined = true
         }
         if defined && finished {
@@ -105,6 +108,9 @@ extension ProgressBar {
         if render {
             self.render()
         }
+        // Flagged #2 (1 of 11): HIGH: Progress-mutating methods do not call `checkIfFinished()`
+        // `add(tasks:)`, `set(items:)`, `add(items:)`, `set(size:)`, and `add(size:)` all mutate their respective progress counters and render, but unlike `set(tasks:)` they never call `checkIfFinished()`. Similarly, `set(totalTasks:)`, `add(totalTasks:)`, `set(totalItems:)`, `add(totalItems:)`, `set(totalSize:)`, and `add(totalSize:)` all modify their respective total counters without calling `checkIfFinished()`. When progress reaches its total via any current-value method, or when a total is reduced to or set at a value the current counter has already reached or exceeded (e.g., `tasks` is already 5 and `set(totalTasks: 5)` is called), the completion condition becomes true but is never evaluated.
+        checkIfFinished()
     }
 
     /// Sets the total tasks.
@@ -115,6 +121,8 @@ extension ProgressBar {
         if render {
             self.render()
         }
+        // Flagged #2 (2 of 11)
+        checkIfFinished()
     }
 
     /// Performs an addition to the total tasks.
@@ -129,6 +137,8 @@ extension ProgressBar {
         if render {
             self.render()
         }
+        // Flagged #2 (3 of 11)
+        checkIfFinished()
     }
 
     /// Sets the items name.
@@ -148,6 +158,8 @@ extension ProgressBar {
         if render {
             self.render()
         }
+        // Flagged #2 (4 of 11)
+        checkIfFinished()
     }
 
     /// Performs an addition to the current items.
@@ -161,6 +173,8 @@ extension ProgressBar {
         if render {
             self.render()
         }
+        // Flagged #2 (5 of 11)
+        checkIfFinished()
     }
 
     /// Sets the total items.
@@ -171,6 +185,8 @@ extension ProgressBar {
         if render {
             self.render()
         }
+        // Flagged #2 (6 of 11)
+        checkIfFinished()
     }
 
     /// Performs an addition to the total items.
@@ -185,6 +201,8 @@ extension ProgressBar {
         if render {
             self.render()
         }
+        // Flagged #2 (7 of 11)
+        checkIfFinished()
     }
 
     /// Sets the current size.
@@ -195,6 +213,8 @@ extension ProgressBar {
         if render {
             self.render()
         }
+        // Flagged #2 (8 of 11)
+        checkIfFinished()
     }
 
     /// Performs an addition to the current size.
@@ -208,6 +228,8 @@ extension ProgressBar {
         if render {
             self.render()
         }
+        // Flagged #2 (9 of 11)
+        checkIfFinished()
     }
 
     /// Sets the total size.
@@ -218,6 +240,8 @@ extension ProgressBar {
         if render {
             self.render()
         }
+        // Flagged #2 (10 of 11)
+        checkIfFinished()
     }
 
     /// Performs an addition to the total size.
@@ -232,5 +256,7 @@ extension ProgressBar {
         if render {
             self.render()
         }
+        // Flagged #2 (11 of 11)
+        checkIfFinished()
     }
 }

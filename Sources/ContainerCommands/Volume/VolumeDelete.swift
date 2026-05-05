@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 23:02 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -38,6 +39,20 @@ extension Application.VolumeCommand {
         var names: [String] = []
 
         public init() {}
+
+        // Flagged #1: HIGH: `volume delete` silently no-ops when called with no arguments, and destroys all volumes when names and `--all` are combined
+        // The `validate()` method was absent entirely. Two invalid invocations were accepted without error: (1) `volume delete` with no names and no `--all` flag — `uniqueVolumeNames` is empty, the filter produces an empty list, the `volumes.count == uniqueVolumeNames.count` check passes (0 == 0), and the command exits successfully having deleted nothing; (2) `volume delete <name> --all` — the `if all` branch is taken unconditionally, so all volumes are deleted even though the user supplied an explicit name, discarding volumes they did not intend to remove.
+        public func validate() throws {
+            if names.count == 0 && !all {
+                throw ContainerizationError(.invalidArgument, message: "no volumes specified and --all not supplied")
+            }
+            if names.count > 0 && all {
+                throw ContainerizationError(
+                    .invalidArgument,
+                    message: "explicitly supplied volume name(s) conflict with the --all flag"
+                )
+            }
+        }
 
         public func run() async throws {
             let uniqueVolumeNames = Set<String>(names)

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 22:01 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -29,6 +30,12 @@ extension String {
     public func fromISO8601Date() -> Date? {
         let iso8601DateFormatter = ISO8601DateFormatter()
         iso8601DateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        // Flagged #1: MEDIUM: `fromISO8601Date()` fails to parse valid ISO 8601 dates without fractional seconds
+        // `.withFractionalSeconds` option makes the formatter reject any ISO 8601 date string that does not contain fractional seconds (e.g., `"2024-01-01T00:00:00Z"` returns `nil`).
+        if let date = iso8601DateFormatter.date(from: self) {
+            return date
+        }
+        iso8601DateFormatter.formatOptions = [.withInternetDateTime]
         return iso8601DateFormatter.date(from: self)
     }
 

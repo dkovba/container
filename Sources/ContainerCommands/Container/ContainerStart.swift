@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 15:48 — 0 critical, 0 high, 2 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -88,8 +89,12 @@ extension Application {
                 }
 
                 var env: [String: String] = [:]
-                if let sshAuthSock = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"] {
-                    env["SSH_AUTH_SOCK"] = sshAuthSock
+                // Flagged #1: MEDIUM: `SSH_AUTH_SOCK` forwarded unconditionally, ignoring container's `ssh` configuration
+                // `SSH_AUTH_SOCK` was read from the host process environment and unconditionally inserted into `dynamicEnv` whenever the variable existed, with no check against the container's stored `ssh` field. `ContainerConfiguration.ssh` records whether SSH agent forwarding was requested at container creation time, but `container start` ignored it entirely.
+                if container.configuration.ssh {
+                    if let sshAuthSock = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"] {
+                        env["SSH_AUTH_SOCK"] = sshAuthSock
+                    }
                 }
 
                 let process = try await client.bootstrap(id: container.id, stdio: io.stdio, dynamicEnv: env)
@@ -100,6 +105,16 @@ extension Application {
                     try io.closeAfterStart()
                     print(self.containerId)
                     return
+                }
+
+                // Flagged #2: MEDIUM: Signal threshold handler missing in non-TTY attach mode
+                // `ContainerStart` omitted the `SignalThreshold` handler that both `ContainerRun` and `ContainerExec` install when attaching to a non-TTY process. Neither `--attach` nor `--interactive` mode set up a handler to force-exit after three SIGINT/SIGTERM signals; the `exitCode = try await io.handleProcess(process:log:)` call was reached with no signal escape hatch in place.
+                if !container.configuration.initProcess.terminal {
+                    var handler = SignalThreshold(threshold: 3, signals: [SIGINT, SIGTERM])
+                    handler.start {
+                        print("Received 3 SIGINT/SIGTERM's, forcefully exiting.")
+                        Darwin.exit(1)
+                    }
                 }
 
                 exitCode = try await io.handleProcess(process: process, log: log)

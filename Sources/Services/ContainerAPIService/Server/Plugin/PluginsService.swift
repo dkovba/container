@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 16:40 — 0 critical, 2 high, 1 medium, 0 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -37,6 +38,11 @@ public actor PluginsService {
     ) throws {
         let registerPlugins = plugins ?? pluginLoader.findPlugins()
         for plugin in registerPlugins {
+            // Flagged #3: MEDIUM: `loadAll` double-registers already-loaded plugins with launchd
+            // `loadAll` unconditionally called `pluginLoader.registerWithLaunchd` for every plugin in the list without checking whether the plugin was already present in `self.loaded`. Unlike the single-plugin `load(name:)` method which guards with `self.loaded[name] == nil`, `loadAll` would re-register plugins that were already loaded — either from a previous `loadAll` call or from individual `load(name:)` calls — resulting in duplicate launchd service registrations.
+            guard self.loaded[plugin.name] == nil else {
+                continue
+            }
             try pluginLoader.registerWithLaunchd(plugin: plugin, debug: debug)
             loaded[plugin.name] = plugin
         }
@@ -45,7 +51,9 @@ public actor PluginsService {
     /// Stop the specified plugins, or all plugins with services defined
     /// if none are explicitly specified.
     public func stopAll(_ plugins: [Plugin]? = nil) throws {
-        let deregisterPlugins = plugins ?? pluginLoader.findPlugins()
+        // Flagged #1: HIGH: `stopAll` attempts to deregister plugins that were never registered
+        // When called without arguments, `stopAll` defaulted to `pluginLoader.findPlugins()` which returns all discoverable plugins on disk, not just the ones currently loaded and registered with launchd. Calling `deregisterWithLaunchd` on a plugin that was never registered throws an error, and because the loop has no error handling, the first such failure causes the method to throw immediately — leaving all remaining actually-loaded plugins still running and registered.
+        let deregisterPlugins = plugins ?? Array(self.loaded.values)
         for plugin in deregisterPlugins {
             try pluginLoader.deregisterWithLaunchd(plugin: plugin)
             self.loaded.removeValue(forKey: plugin.name)
@@ -79,7 +87,11 @@ public actor PluginsService {
         guard let plugin = self.loaded[name] else {
             throw Error.pluginNotLoaded(name)
         }
-        try ServiceManager.kickstart(fullServiceLabel: plugin.getLaunchdLabel())
+        // Flagged #2: HIGH: `restart` passes incomplete service label to `launchctl kickstart`
+        // `restart` called `ServiceManager.kickstart(fullServiceLabel: plugin.getLaunchdLabel())`, but `getLaunchdLabel()` returns only the bare label (e.g. `com.apple.container.pluginname`) without the required domain prefix. `launchctl kickstart -k` expects a fully-qualified service target in `domain/service-label` format (e.g. `gui/501/com.apple.container.pluginname`). The sibling operation `deregisterWithLaunchd` in `PluginLoader` correctly constructs the full label by prepending `ServiceManager.getDomainString()` + `/`, but `restart` skipped this step.
+        let domain = try ServiceManager.getDomainString()
+        let fullLabel = "\(domain)/\(plugin.getLaunchdLabel())"
+        try ServiceManager.kickstart(fullServiceLabel: fullLabel)
     }
 
     /// Unload a loaded plugin.

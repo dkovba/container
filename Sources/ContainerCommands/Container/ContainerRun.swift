@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 15:31 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -124,8 +125,12 @@ extension Application {
                 }
 
                 var dynamicEnv: [String: String] = [:]
-                if let sshAuthSock = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"] {
-                    dynamicEnv["SSH_AUTH_SOCK"] = sshAuthSock
+                // Flagged #1: MEDIUM: `SSH_AUTH_SOCK` forwarded unconditionally, ignoring `--ssh` flag
+                // `SSH_AUTH_SOCK` was read from the host process environment and added to `dynamicEnv` whenever it existed, with no check against `managementFlags.ssh`.
+                if self.managementFlags.ssh {
+                    if let sshAuthSock = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"] {
+                        dynamicEnv["SSH_AUTH_SOCK"] = sshAuthSock
+                    }
                 }
 
                 let process = try await client.bootstrap(id: id, stdio: io.stdio, dynamicEnv: dynamicEnv)

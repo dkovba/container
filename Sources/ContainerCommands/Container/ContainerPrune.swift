@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 15:05 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -41,8 +42,10 @@ extension Application {
             for container in containersToPrune {
                 do {
                     let actualSize = try await client.diskUsage(id: container.id)
-                    totalSize += actualSize
                     try await client.delete(id: container.id)
+                    // Flagged #1: MEDIUM: Freed-space total inflated when container deletion fails
+                    // `totalSize += actualSize` was executed immediately after a successful `diskUsage` call but *before* `client.delete`. If `delete` threw an error, the container was not removed, yet its size had already been added to `totalSize`. The subsequent `print("Reclaimed \(freed) in disk space")` would therefore report a larger reclaimed value than actually freed.
+                    totalSize += actualSize
                     prunedContainerIds.append(container.id)
                 } catch {
                     log.error(

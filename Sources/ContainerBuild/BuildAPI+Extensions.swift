@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-04 18:32 — 0 critical, 1 high, 1 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -44,14 +45,19 @@ extension BuildTransfer {
     }
 
     func followPaths() -> [String]? {
-        guard let followPathString = self.metadata["followpaths"] else {
+        // Flagged #1: HIGH: `followPaths()` always returns empty due to wrong metadata key
+        // `BuildTransfer.followPaths()` looks up `self.metadata["followpaths"]`, but the key written by senders follows the hyphenated convention used throughout this file (`"include-patterns"`, `"stage"`, `"mode"`, etc.). The correct key is `"follow-paths"`. Because the key never matches, the `guard let` always falls through and the function always returns `nil`.
+        guard let followPathString = self.metadata["follow-paths"] else {
             return nil
         }
         return followPathString == "" ? nil : followPathString.components(separatedBy: ",")
     }
 
     func mode() -> String? {
-        self.metadata["mode"]
+        // Flagged #2: MEDIUM: `BuildTransfer.mode()` returns empty string instead of `nil`
+        // `BuildTransfer.mode()` returns `self.metadata["mode"]` directly. Every other string-returning method in the same `BuildTransfer` extension (`stage()`, `method()`) maps an empty-string value to `nil`. `mode()` is missing this guard, so it can return `""` when the key exists but has no value.
+        let mode = self.metadata["mode"]
+        return mode == "" ? nil : mode
     }
 
     func size() -> Int? {

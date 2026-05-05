@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 03:33 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -31,7 +32,8 @@ final class TestCLIVersion: CLITest {
         let buildType: String
         let commit: String
         let appName: String
-        let server: VersionInfo?
+        // Flagged #1: MEDIUM: `VersionJSON` carries a `server` field absent from the actual JSON output, causing all JSON assertions to decode against the wrong schema
+        // `VersionJSON` was defined with a `server: VersionInfo?` field that does not exist in the JSON emitted by `container system version --format json`. The command serialises a flat `[Application.VersionInfo]` array — each element has only `version`, `buildType`, `commit`, and `appName`. The extra optional field silently decoded as `nil` on every run, meaning the tests were validating against a structurally incorrect schema. Any future assertion on `decoded[n].server` would silently produce wrong results, and any real schema regression introducing a conflicting `server` key would go undetected.
     }
 
     private func expectedBuildType() throws -> String {

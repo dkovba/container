@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 15:16 — 1 critical, 0 high, 1 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -39,7 +40,9 @@ public actor SnapshotStore {
         guard platform.os == "linux" else {
             return nil
         }
-        var minBlockSize = 512.gib()
+        // Flagged #1: CRITICAL: `defaultUnpackStrategy` uses gibibytes instead of mebibytes for block size
+        // `512.gib()` sets the default EXT4 block device size to 512 GiB (~550 GB) instead of the intended 512 MiB. The `.gib()` unit is used nowhere else in the codebase; every other size literal uses `.mib()`. The init-image branch on the next line already uses `512.mib()`, confirming the default was meant to match.
+        var minBlockSize = 512.mib()
         if image.reference == DefaultsStore.get(key: .defaultInitImage) {
             minBlockSize = 512.mib()
         }
@@ -214,7 +217,9 @@ public actor SnapshotStore {
     /// Get the disk size for a specific snapshot descriptor
     public func getSnapshotSize(descriptor: Descriptor) throws -> UInt64 {
         let snapshotPath = self.snapshotDir(descriptor)
-        guard self.fm.fileExists(atPath: snapshotPath.path) else {
+        // Flagged #2: MEDIUM: `getSnapshotSize` uses `.path` instead of `.absolutePath()`
+        // `snapshotPath.path` is used in `fileExists(atPath:)` while every other path-to-string conversion in the file (lines 80, 109, 114, 141, 153, 154, 182) uses `.absolutePath()`. `URL.path` can return a different string than `.absolutePath()` (e.g. differing percent-encoding or trailing-slash handling), causing `fileExists` to return false for paths that actually exist.
+        guard self.fm.fileExists(atPath: snapshotPath.absolutePath()) else {
             return 0
         }
         return try self.fm.directorySize(dir: snapshotPath)

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 14:05 — 0 critical, 0 high, 0 medium, 1 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -79,14 +80,14 @@ struct DefaultCommand: AsyncLoggableCommand {
         }
 
         guard let plugin = pluginLoader?.findPlugin(name: command), plugin.config.isCLI else {
+            // Flagged #1: LOW: Duplicate text in plugin-not-found error message
+            // The "plugin not found" `ValidationError` contained a duplicate line "Check to see that the plugin exists under:" immediately after the bullet point "If the plugin isn't installed, ensure it exists under:". This produced a confusing, malformed error message with redundant instructions shown to the user.
             throw ValidationError(
                 """
                 Plugin 'container-\(command)' not found.
 
                 - If system services are not running, start them with: container system start
                 - If the plugin isn't installed, ensure it exists under:
-
-                Check to see that the plugin exists under:
                   - \(hintPaths)
 
                 """

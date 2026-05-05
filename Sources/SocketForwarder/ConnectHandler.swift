@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-06 15:56 — 0 critical, 1 high, 1 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -41,7 +42,9 @@ extension ConnectHandler: ChannelInboundHandler {
     func handlerAdded(context: ChannelHandlerContext) {
         // Add logger metadata.
         self.log?[metadataKey: "proxy"] = "\(context.channel.localAddress?.description ?? "none")"
-        self.log?[metadataKey: "server"] = "\(context.channel.remoteAddress?.description ?? "none")"
+        // Flagged #2: MEDIUM: `"server"` log metadata records wrong address
+        // The `"server"` metadata key is set to `context.channel.remoteAddress`, which on the frontend channel is the *client's* address, not the backend server's address. All log entries emitted by this handler carry an incorrect `server` metadata value.
+        self.log?[metadataKey: "server"] = "\(self.serverAddress)"
     }
 
     func channelActive(context: ChannelHandlerContext) {
@@ -83,7 +86,9 @@ extension ConnectHandler {
                 case .success(let channel):
                     guard context.channel.isActive else {
                         self.log?.trace("backend - frontend channel closed, closing backend connection")
-                        context.channel.close(promise: nil)
+                        // Flagged #1: HIGH: Backend channel leaked when frontend becomes inactive
+                        // When the backend connection succeeds but the frontend channel is already inactive, `context.channel.close(promise: nil)` is called — this targets the frontend channel (already inactive) instead of the newly connected backend `channel`. The backend channel is never closed and leaks its file descriptor.
+                        channel.close(promise: nil)
                         return
                     }
                     self.log?.trace("backend - connected")

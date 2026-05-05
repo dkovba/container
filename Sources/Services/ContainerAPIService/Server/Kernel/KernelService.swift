@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 15:24 — 0 critical, 1 high, 1 medium, 1 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -69,8 +70,10 @@ public actor KernelService {
             }
         }
         try FileManager.default.copyItem(at: kFile, to: destPath)
-        try Task.checkCancellation()
         do {
+            // Flagged #3: LOW: `installKernel` does not clean up copied file on task cancellation
+            // `try Task.checkCancellation()` sits between `copyItem(at:to:)` and the `do-catch` block whose `catch` clause removes `destPath`. If the task is cancelled after the copy succeeds, the `CancellationError` is thrown before entering the `do` block, so the `catch` cleanup never runs and the orphaned file at `destPath` is leaked on disk.
+            try Task.checkCancellation()
             try self.setDefaultKernel(name: kFile.lastPathComponent, platform: platform)
         } catch {
             try? FileManager.default.removeItem(at: destPath)
@@ -114,7 +117,9 @@ public actor KernelService {
         let taskManager = ProgressTaskCoordinator()
         let downloadTask = await taskManager.startTask()
         var tarFile = tar
-        if !FileManager.default.fileExists(atPath: tar.absoluteString) {
+        // Flagged #2 (1 of 2): MEDIUM: `installKernelFrom` uses `absoluteString` instead of `path` for local-file detection
+        // `FileManager.default.fileExists(atPath: tar.absoluteString)` passes a URL's `absoluteString` (which includes the `file://` scheme prefix, e.g. `file:///path/to/file.tar`) to `fileExists(atPath:)`, which expects a plain filesystem path. The check always returns `false` for local file URLs, so (1) a local tar file is unnecessarily re-downloaded from itself on line 117, and (2) the cleanup guard on line 134 incorrectly attempts to delete the original local tar file.
+        if !FileManager.default.fileExists(atPath: tar.path) {
             self.log.debug("KernelService: start download", metadata: ["tar": "\(tar)"])
             tarFile = tempDir.appendingPathComponent(tar.lastPathComponent)
             var downloadProgressUpdate: ProgressUpdateHandler?
@@ -131,7 +136,8 @@ public actor KernelService {
         let kernelFile = try self.extractFile(tarFile: tarFile, at: kernelFilePath, to: tempDir)
         try self.installKernel(kernelFile: kernelFile, platform: platform, force: force)
 
-        if !FileManager.default.fileExists(atPath: tar.absoluteString) {
+        // Flagged #2 (2 of 2)
+        if !FileManager.default.fileExists(atPath: tar.path) {
             try FileManager.default.removeItem(at: tarFile)
         }
     }
@@ -202,11 +208,19 @@ public actor KernelService {
             // the previous extractFile changes the underlying file pointer, so we need to reopen the file
             // to ensure we traverse all the files in the archive
             archiveReader = try ArchiveReader(file: tarFile)
-            let symlinkTarget = URL(filePath: target).deletingLastPathComponent().appending(path: symlinkRelative)
+            // Flagged #1 (1 of 2): HIGH: `extractFile` symlink resolution turns relative archive paths into absolute filesystem paths
+            // `URL(filePath: target)` resolves a relative tar-internal path (e.g. `boot/vmlinux`) against the current working directory, producing an absolute URL like `file:///cwd/boot/vmlinux`. After `deletingLastPathComponent()`, `appending(path:)`, and `.standardized`, the resulting `.relativePath` (identical to `.path` when no base URL exists) is an absolute filesystem path such as `/cwd/kernel/vmlinux-6.1`. The subsequent `archiveReader.extractFile(path:)` call fails to match any archive entry because tar entries use relative paths.
+            let isRelative = !target.hasPrefix("/")
+            let absTarget = isRelative ? "/" + target : target
+            let symlinkTarget = URL(filePath: absTarget).deletingLastPathComponent().appending(path: symlinkRelative)
 
             // standardize so that we remove any and all ../ and ./ in the path since symlink targets
             // are relative paths to the target file from the symlink's parent dir itself
-            target = symlinkTarget.standardized.relativePath
+            // Flagged #1 (2 of 2)
+            target = symlinkTarget.standardized.path
+            if isRelative {
+                target = String(target.dropFirst())
+            }
             let (_, targetData) = try archiveReader.extractFile(path: target)
             data = targetData
         }

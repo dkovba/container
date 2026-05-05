@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 01:23 — 0 critical, 0 high, 2 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -236,7 +237,9 @@ class TestCLINoParallelCases: CLITest {
         )
         try waitForContainerRunning(containerName)
         let container = try inspectContainer(containerName)
-        #expect(container.networks.count > 0)
+        // Flagged #1: MEDIUM: `#expect` instead of `try #require` for network-attachment precondition in `testNetworkPruneSkipsNetworksInUse`
+        // `#expect(container.networks.count > 0)` records a failure but does not stop execution. If the container is not attached to the network (e.g. due to a race or setup failure), the test continues into the prune step. The subsequent assertion `#expect(listAfter.contains(networkInUse), "network in use should NOT be pruned")` then fails with a misleading message implying the prune logic is wrong, when the real problem is that the precondition — the container being connected to the network — was never satisfied.
+        try #require(container.networks.count > 0)
 
         // Prune should only remove the unused network
         let (_, _, error, status) = try run(arguments: ["network", "prune"])
@@ -272,13 +275,17 @@ class TestCLINoParallelCases: CLITest {
 
         // Creation of container with network connection
         let port = UInt16.random(in: 50000..<60000)
+        // Flagged #2: MEDIUM: `autoRemove: true` (default) and `Task.sleep` race condition prevent `testNetworkPruneSkipsNetworkAttachedToStoppedContainer` from ever testing a stopped container
+        // Two setup defects combine to prevent the test from reaching the scenario it names. First, `doLongRun` is called with its default `autoRemove: true`, which passes `--rm` to the container runtime. As a result, calling `doStop` later both stops and immediately removes the container — the container is never in a "stopped but still exists" state, and the first network prune therefore runs while the container is still running, not while it is stopped. Second, the test uses a fixed 1-second `Task.sleep(for: .seconds(1))` in place of `waitForContainerRunning` before calling `try? doStop(name: containerName)`. The sleep provides no guarantee that the container has reached the running state: if the container has not started within that second, `doStop` fails and the error is silently discarded by `try?`, leaving the container still starting (or never fully connected to the network) when the prune runs. In that scenario the prune may remove the network, causing `#expect(listAfter.contains(networkName), ...)` to fail for reasons unrelated to the prune logic.
         try doLongRun(
             name: containerName,
             image: "docker.io/library/python:alpine",
             args: ["--network", networkName],
-            containerArgs: ["python3", "-m", "http.server", "--bind", "0.0.0.0", "\(port)"]
+            containerArgs: ["python3", "-m", "http.server", "--bind", "0.0.0.0", "\(port)"],
+            autoRemove: false
         )
-        try await Task.sleep(for: .seconds(1))
+        try waitForContainerRunning(containerName)
+        try? doStop(name: containerName)
 
         // Prune should NOT remove the network (container exists, even if stopped)
         let (_, _, error, status) = try run(arguments: ["network", "prune"])

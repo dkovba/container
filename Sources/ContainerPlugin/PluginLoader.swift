@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-06 13:05 — 0 critical, 0 high, 2 medium, 1 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -74,7 +75,9 @@ extension PluginLoader {
             return original
         }
 
-        var lines = original.split(separator: "\n").map { String($0) }
+        // Flagged #2: MEDIUM: `alterCLIHelpText` strips blank lines from original help text
+        // `original.split(separator: "\n")` uses the default `omittingEmptySubsequences: true`, which silently removes all blank lines from the original help text before appending the plugins section.
+        var lines = original.split(separator: "\n", omittingEmptySubsequences: false).map { String($0) }
 
         let sectionHeader = "PLUGINS:"
         lines.append(sectionHeader)
@@ -187,7 +190,9 @@ extension PluginLoader {
                 }
             }
         } catch {
-            log?.warning(
+            // Flagged #1: MEDIUM: Error warnings silently dropped due to parameter shadowing instance logger
+            // The `log` parameter defaults to `nil` and shadows the instance property `self.log`. In the `catch` block, `log?.warning(...)` uses the parameter, so when no explicit logger is passed by the caller, warnings are silently discarded even though the `PluginLoader` was initialized with a logger.
+            (log ?? self.log)?.warning(
                 "not installing plugin with invalid configuration",
                 metadata: [
                     "name": "\(name)",
@@ -261,7 +266,9 @@ extension PluginLoader {
         }
         let domain = try ServiceManager.getDomainString()
         let label = "\(domain)/\(plugin.getLaunchdLabel(instanceId: instanceId))"
-        log?.info("Deregistering plugin", metadata: ["id": "\(plugin.getLaunchdLabel())"])
+        // Flagged #3: LOW: `deregisterWithLaunchd` logs wrong label when instanceId is provided
+        // The log statement uses `plugin.getLaunchdLabel()` without passing `instanceId`, while the actual deregistration on the next line correctly uses `plugin.getLaunchdLabel(instanceId: instanceId)`. When `instanceId` is non-nil the logged label does not match the service being deregistered.
+        log?.info("Deregistering plugin", metadata: ["id": "\(plugin.getLaunchdLabel(instanceId: instanceId))"])
         try ServiceManager.deregister(fullServiceLabel: label)
     }
 

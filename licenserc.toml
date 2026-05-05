@@ -1,3 +1,4 @@
+# fix-bugs: 2026-05-09 21:00 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 additionalHeaders = ["scripts/container-header-style.toml"]
 
 headerPath = "scripts/license-header.txt"
@@ -15,8 +16,10 @@ includes = [
 excludes = []
 
 [git]
-attrs = 'enable'
-ignore = 'enable'
+# Flagged #1: HIGH: `[git]` section uses string literals instead of booleans for `attrs` and `ignore`
+# `attrs = 'enable'` and `ignore = 'enable'` assign string values to fields that hawkeye expects to be TOML booleans. TOML distinguishes strictly between the string `'enable'` and the boolean `true`; a conforming parser will not coerce one to the other, so hawkeye will either reject the configuration or silently ignore both git-integration flags.
+attrs = true
+ignore = true
 
 [properties]
 copyrightOwner = "Apple Inc. and the container project authors"

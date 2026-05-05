@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 11:47 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -74,7 +75,9 @@ struct BuildRemoteContentProxy: BuildPipelineHandler {
     }
 
     func readerAt(_ sender: AsyncStream<ClientStream>.Continuation, _ packet: ImageTransfer, _ buildID: String) async throws {
-        let digest = packet.descriptor.digest
+        // Flagged #1 (1 of 2): HIGH: `readerAt` reads digest from wrong field, causing content lookup to always fail
+        // `readerAt` uses `packet.descriptor.digest` to look up content in the store, but the protocol places the content digest in `packet.tag`. The `descriptor` sub-message is an unset protobuf field with an empty-string digest by default, so the lookup will never find the requested content.
+        let digest = packet.tag
         let offset: UInt64 = packet.offset() ?? 0
         let size: Int = packet.len() ?? 0
         guard let descriptor = try await local.get(digest: digest) else {
@@ -97,7 +100,8 @@ struct BuildRemoteContentProxy: BuildPipelineHandler {
             return
         }
         guard let data = try descriptor.data(offset: offset, length: size) else {
-            throw Error.invalidOffsetSizeForContent(packet.descriptor.digest, offset, size)
+            // Flagged #1 (2 of 2)
+            throw Error.invalidOffsetSizeForContent(digest, offset, size)
         }
 
         let transfer = try ImageTransfer(

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 05:39 — 0 critical, 1 high, 1 medium, 1 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -148,21 +149,12 @@ extension Application {
                 )
                 let cpuChanged = existingResources.cpus != resolvedResources.cpus
                 let memChanged = existingResources.memoryInBytes != resolvedResources.memoryInBytes
-                let dnsChanged = {
-                    if !dnsNameservers.isEmpty {
-                        return existingDNS?.nameservers != dnsNameservers
-                    }
-                    if dnsDomain != nil {
-                        return existingDNS?.domain != dnsDomain
-                    }
-                    if !dnsSearchDomains.isEmpty {
-                        return existingDNS?.searchDomains != dnsSearchDomains
-                    }
-                    if !dnsOptions.isEmpty {
-                        return existingDNS?.options != dnsOptions
-                    }
-                    return false
-                }()
+                // Flagged #2: MEDIUM: `dnsChanged` closure short-circuits on first non-empty DNS field, silently ignoring the rest
+                // The closure used a chain of `if !field.isEmpty { return field != existing }` statements. Each branch returned immediately when it found the first non-empty/non-nil DNS parameter, so any subsequent DNS fields were never evaluated. For example, if `dnsNameservers` was provided and matched the existing container, the closure returned `false` without checking `dnsDomain`, `dnsSearchDomains`, or `dnsOptions`. Changed DNS values in those fields were silently ignored.
+                let dnsChanged = (!dnsNameservers.isEmpty && existingDNS?.nameservers != dnsNameservers)
+                    || (dnsDomain != nil && existingDNS?.domain != dnsDomain)
+                    || (!dnsSearchDomains.isEmpty && existingDNS?.searchDomains != dnsSearchDomains)
+                    || (!dnsOptions.isEmpty && existingDNS?.options != dnsOptions)
 
                 switch existingContainer.status {
                 case .running:
@@ -177,7 +169,9 @@ extension Application {
                     // If the builder is stopped and matches our requirements, start it
                     // Otherwise, delete it and create a new one
                     guard imageChanged || cpuChanged || memChanged || envChanged || dnsChanged else {
-                        try await startBuildKit(client: client, id: existingContainer.id, progressUpdate, nil)
+                        // Flagged #3: LOW: `startBuildKit` called with `nil` task manager when restarting a stopped container
+                        // In the `.stopped` case, when the existing container's configuration matches and it only needs to be restarted, `startBuildKit` was called with `nil` as the `taskManager` argument. The `startBuildKit` function calls `await taskManager?.finish()` after starting the process; passing `nil` meant this call was a no-op, so the `ProgressTaskCoordinator` task that was started at the top of `start()` (via `taskManager.startTask()`) was never finished.
+                        try await startBuildKit(client: client, id: existingContainer.id, progressUpdate, taskManager)
                         return
                     }
                     try await client.delete(id: existingContainer.id)
@@ -187,7 +181,9 @@ extension Application {
                         message: "builder is stopping, please wait until it is fully stopped before proceeding"
                     )
                 case .unknown:
-                    break
+                    // Flagged #1: HIGH: `.unknown` container status falls through to `client.create` without deleting the existing container
+                    // In the `switch existingContainer.status` block, the `.unknown` case contained only `break`. After the switch, execution unconditionally falls through to `client.create(configuration:options:kernel:)` using `id: Builder.builderContainerId` ("buildkit"). Because the existing container with that ID was never deleted, the create call attempts to register a second container under an already-occupied ID.
+                    try await client.delete(id: existingContainer.id)
                 }
             }
 

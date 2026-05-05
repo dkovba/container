@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-04 13:29 — 0 critical, 1 high, 1 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -196,6 +197,19 @@ public struct Message: Sendable {
             let rdataSize = answer.type == .host ? 4 : 16
             bufferSize += (try DNSName(labels: n.isEmpty ? [] : n.split(separator: ".", omittingEmptySubsequences: false).map(String.init))).size + 10 + rdataSize
         }
+        // Flagged #1 (1 of 2): HIGH: `serialize()` allocates a buffer too small to hold authority and additional records
+        // `bufferSize` is computed by summing the header size plus the encoded sizes of `questions` and `answers`, but the method subsequently writes `authorities` and `additional` records into the same pre-allocated buffer. Because those sections are not counted, every `copyIn` call for an authority or additional record receives a buffer whose remaining capacity is zero, causing each guard to fire and throw `DNSBindError.marshalFailure`. Even if the writes somehow succeeded, the final `guard offset == bufferSize` check would throw `DNSBindError.unexpectedOffset` because `offset` would exceed `bufferSize`.
+        for authority in authorities {
+            let n = authority.name.hasSuffix(".") ? String(authority.name.dropLast()) : authority.name
+            let rdataSize = authority.type == .host ? 4 : 16
+            bufferSize += (try DNSName(labels: n.isEmpty ? [] : n.split(separator: ".", omittingEmptySubsequences: false).map(String.init))).size + 10 + rdataSize
+        }
+        // Flagged #1 (2 of 2)
+        for record in additional {
+            let n = record.name.hasSuffix(".") ? String(record.name.dropLast()) : record.name
+            let rdataSize = record.type == .host ? 4 : 16
+            bufferSize += (try DNSName(labels: n.isEmpty ? [] : n.split(separator: ".", omittingEmptySubsequences: false).map(String.init))).size + 10 + rdataSize
+        }
 
         var buffer = [UInt8](repeating: 0, count: bufferSize)
         var offset = 0
@@ -214,7 +228,9 @@ public struct Message: Sendable {
         flags |= truncation ? 0x0200 : 0
         flags |= recursionDesired ? 0x0100 : 0
         flags |= recursionAvailable ? 0x0080 : 0
-        flags |= UInt16(returnCode.rawValue)
+        // Flagged #2: MEDIUM: `serialize()` writes RCODE without masking to 4 bits, corrupting adjacent flags
+        // `flags |= UInt16(returnCode.rawValue)` ORs the full raw value of `returnCode` into the flags word without masking it to `0x000F`. The standard DNS header RCODE field occupies only bits 3–0 (RFC 1035). `ReturnCode` includes extended values above 15 (e.g. `badSignature = 16`, `badKey = 17`, up to `badCookie = 23`). For any such value, bits 4–7 of the flags word are set, overwriting the CD, AD, and Z fields. The deserializer correctly masks with `flags & 0x000F` before constructing a `ReturnCode`, so a serialize/deserialize round-trip for any `ReturnCode` with `rawValue > 15` silently produces `.noError` instead of the intended code.
+        flags |= UInt16(returnCode.rawValue) & 0x000F
 
         guard let newOffset = buffer.copyIn(as: UInt16.self, value: flags.bigEndian, offset: offset) else {
             throw DNSBindError.marshalFailure(type: "Message", field: "flags")

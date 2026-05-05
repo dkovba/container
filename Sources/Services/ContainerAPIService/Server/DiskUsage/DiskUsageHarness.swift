@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 13:59 — 0 bugs
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -41,11 +42,9 @@ public struct DiskUsageHarness: Sendable {
             return reply
         } catch {
             log.error("failed to get disk usage", metadata: ["error": "\(error)"])
-            throw ContainerizationError(
-                .internalError,
-                message: "failed to get disk usage",
-                cause: error
-            )
+            // Flagged #1: MEDIUM: Error re-wrapping masks original error code in `get()`
+            // The `catch` block wraps every error in a new `ContainerizationError(.internalError, ...)`, replacing the original error's code with `.internalError`. When `calculateDiskUsage()` throws a `ContainerizationError` with a specific code (e.g., `.invalidArgument`), the client receives `.internalError` instead of the actual error code.
+            throw error
         }
     }
 }

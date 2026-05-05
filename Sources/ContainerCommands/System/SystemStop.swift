@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 22:31 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -98,7 +99,9 @@ extension Application {
             // if somehow the launchd domain changed, XPC interactions would not be possible.
             try ServiceManager.enumerate()
                 .filter { $0.hasPrefix(prefix) }
-                .filter { $0 != fullLabel }
+                // Flagged #1: HIGH: `ServiceManager.enumerate()` labels never match `fullLabel`, causing apiserver to be deregistered twice
+                // `ServiceManager.enumerate()` returns plain service labels (e.g. `"com.apple.container.apiserver"`), but the filter compared them against `fullLabel`, which is constructed as `"\(launchdDomainString)/\(prefix)apiserver"` and therefore includes the launchd domain prefix (e.g. `"gui/501/com.apple.container.apiserver"`). Because the two strings are never in the same format, the comparison `$0 != fullLabel` is always `true`, so the apiserver label is never excluded from the secondary deregistration loop. As a result, when the APIServer is running and has already been deregistered via the explicit `ServiceManager.deregister(fullServiceLabel: fullLabel)` call above, the `forEach` loop unconditionally attempts to deregister it a second time.
+                .filter { $0 != "\(prefix)apiserver" }
                 .map { "\(launchdDomainString)/\($0)" }
                 .forEach {
                     log.info("stopping service", metadata: ["label": "\($0)"])

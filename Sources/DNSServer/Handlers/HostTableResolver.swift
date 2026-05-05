@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-04 01:18 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -32,7 +33,9 @@ public struct HostTableResolver: DNSHandler {
     /// - Parameter ttl: The TTL in seconds to set on answer records (default is 300).
     /// - Throws: `DNSBindError.invalidName` if any key is not a valid DNS name.
     public init(hosts4: [String: IPv4Address], ttl: UInt32 = 300) throws {
-        self.hosts4 = try Dictionary(uniqueKeysWithValues: hosts4.map { (try DNSName($0.key), $0.value) })
+        // Flagged #1: HIGH: `init(hosts4:)` traps at runtime when two input keys normalize to the same `DNSName`
+        // `Dictionary(uniqueKeysWithValues:)` calls `preconditionFailure` if the sequence it receives contains duplicate keys. Because input keys are normalized (lowercased, trailing dot stripped) before being inserted, two distinct input strings such as `"FOO."` and `"foo."` both map to the same `DNSName`. The precondition is therefore violated even though the caller supplied a valid `[String: IPv4Address]` dictionary with no duplicate string keys.
+        self.hosts4 = try Dictionary(hosts4.map { (try DNSName($0.key), $0.value) }, uniquingKeysWith: { first, _ in first })
         self.ttl = ttl
     }
 

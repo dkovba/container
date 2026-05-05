@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-06 18:10 — 0 critical, 3 high, 0 medium, 1 low (4 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -39,8 +40,10 @@ public final class ProgressBar: Sendable {
         case .plain:
             term = config.terminal
         }
+        // Flagged #4: LOW: `init` ignores configured `initialSubDescription`
+        // The `ProgressBar` initializer constructed its `State` without passing `config.initialSubDescription`, even though `ProgressConfig` accepts and stores this value. The `State` init parameter `subDescription` would default to `""`, so the caller-supplied initial sub-description was silently discarded.
         let state = State(
-            description: config.initialDescription, itemsName: config.initialItemsName, totalTasks: config.initialTotalTasks,
+            description: config.initialDescription, subDescription: config.initialSubDescription, itemsName: config.initialItemsName, totalTasks: config.initialTotalTasks,
             totalItems: config.initialTotalItems,
             totalSize: config.initialTotalSize)
         self.state = Mutex(state)
@@ -53,16 +56,36 @@ public final class ProgressBar: Sendable {
     }
 
     /// Allows resetting the progress state.
+    // Flagged #3: HIGH: `reset()` loses render task and discards initial configuration
+    // `reset()` replaced the entire `State` value with a new instance without preserving `renderTask`, `iteration`, `lastPlainRenderTime`, or `output` — the same defect class as `resetCurrentTask()`. The running animation `Task` reference was lost, allowing `start()` to spawn a duplicate concurrent render loop. Additionally, it only passed `config.initialDescription` to the new `State`, while the constructor also passes `initialItemsName`, `initialTotalTasks`, `initialTotalItems`, `initialTotalSize`, and `initialSubDescription`. After a reset, these configured initial values were lost and replaced with empty/nil defaults.
     public func reset() {
         state.withLock {
-            $0 = State(description: config.initialDescription)
+            let renderTask = $0.renderTask
+            let iteration = $0.iteration
+            let lastPlainRenderTime = $0.lastPlainRenderTime
+            let output = $0.output
+            $0 = State(description: config.initialDescription, subDescription: config.initialSubDescription, itemsName: config.initialItemsName, totalTasks: config.initialTotalTasks, totalItems: config.initialTotalItems, totalSize: config.initialTotalSize)
+            $0.renderTask = renderTask
+            $0.iteration = iteration
+            $0.lastPlainRenderTime = lastPlainRenderTime
+            $0.output = output
         }
     }
 
     /// Allows resetting the progress state of the current task.
     public func resetCurrentTask() {
         state.withLock {
+            // Flagged #1: HIGH: `resetCurrentTask()` loses render task and animation state
+            // `resetCurrentTask()` replaced the entire `State` value without preserving `renderTask`, `iteration`, `lastPlainRenderTime`, or `output`. This caused the reference to the running animation `Task` to be lost, allowing `start()` to spawn a duplicate concurrent render loop. It also reset the spinner frame counter to 0 (visual jump) and cleared the plain-mode throttle timestamp.
+            let renderTask = $0.renderTask
+            let iteration = $0.iteration
+            let lastPlainRenderTime = $0.lastPlainRenderTime
+            let output = $0.output
             $0 = State(description: $0.description, itemsName: $0.itemsName, tasks: $0.tasks, totalTasks: $0.totalTasks, startTime: $0.startTime)
+            $0.renderTask = renderTask
+            $0.iteration = iteration
+            $0.lastPlainRenderTime = lastPlainRenderTime
+            $0.output = output
         }
     }
 
@@ -80,9 +103,9 @@ public final class ProgressBar: Sendable {
 
     /// Updates the additional description of the progress bar.
     /// - Parameter subDescription: The additional description of the action being performed.
+    // Flagged #2: HIGH: `set(subDescription:)` destroys current task progress
+    // `set(subDescription:)` called `resetCurrentTask()` before setting the sub-description. `resetCurrentTask()` zeroes out `items`, `size`, `totalItems`, and `totalSize`, so merely updating a label would wipe all accumulated download/item progress for the current task.
     public func set(subDescription: String) {
-        resetCurrentTask()
-
         state.withLock { $0.subDescription = subDescription }
     }
 

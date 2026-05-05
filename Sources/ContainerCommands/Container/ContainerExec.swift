@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 06:32 — 0 critical, 1 high, 1 medium, 1 low (3 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -53,15 +54,21 @@ extension Application {
             let tty = self.processFlags.tty
 
             var config = container.configuration.initProcess
-            config.executable = arguments.first!
+            // Flagged #1: HIGH: Force-unwrap of `arguments.first` crashes when no command is supplied
+            // `config.executable = arguments.first!` unconditionally force-unwrapped the first element of `arguments`, which is declared as `@Argument(parsing: .captureForPassthrough)` and resolves to a `[String]` that can be empty when the user omits the command after the container ID. Swift force-unwrapping a `nil` Optional terminates the process with a fatal error rather than producing a recoverable error message.
+            guard let executable = arguments.first else {
+                throw ValidationError("No command specified")
+            }
+            config.executable = executable
             config.arguments = [String](self.arguments.dropFirst())
             config.terminal = tty
-            config.environment.append(
-                contentsOf: try Parser.allEnv(
-                    imageEnvs: [],
-                    envFiles: self.processFlags.envFile,
-                    envs: self.processFlags.env
-                ))
+            // Flagged #2: MEDIUM: `--env` / `--env-file` values appended without deduplication against inherited environment
+            // `config.environment` was initialised from `container.configuration.initProcess`, which already contains the container's full environment. The code then called `config.environment.append(contentsOf: try Parser.allEnv(imageEnvs: [], ...))`. Passing `imageEnvs: []` excluded the inherited environment from `Parser.allEnv`'s deduplication pass, so any key present in both the container's environment and the user-supplied `--env` flags ended up duplicated in the final array. Behaviour with duplicate environment keys is undefined in POSIX `execve`.
+            config.environment = try Parser.allEnv(
+                imageEnvs: config.environment,
+                envFiles: self.processFlags.envFile,
+                envs: self.processFlags.env
+            )
 
             if let cwd = self.processFlags.cwd {
                 config.workingDirectory = cwd
@@ -73,6 +80,9 @@ extension Application {
                 gid: processFlags.gid, defaultUser: defaultUser)
             config.user = user
             config.supplementalGroups.append(contentsOf: additionalGroups)
+            // Flagged #3: LOW: `--ulimit` flags silently ignored in `exec`
+            // `Flags.Process` exposes a `ulimits: [String]` option and `Parser.rlimits` is available to parse it, but `ContainerExec` never read `processFlags.ulimits` or updated `config.rlimits`. Any `--ulimit` argument passed to `container exec` was accepted by the argument parser and then discarded.
+            config.rlimits.append(contentsOf: try Parser.rlimits(processFlags.ulimits))
 
             do {
                 let io = try ProcessIO.create(tty: tty, interactive: stdin, detach: self.detach)

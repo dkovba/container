@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 15:01 — 0 critical, 0 high, 0 medium, 1 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -76,6 +77,9 @@ struct StandardQueryValidatorTest {
         #expect(.formatError == response?.returnCode)
         #expect(3 == response?.id)
         #expect(.response == response?.type)
+        // Flagged #1: LOW: `testRejectNoQuestions` omits assertion on echoed questions count
+        // `testRejectNoQuestions` verified the return code, id, type, and answer count of the error response, but never asserted that `response?.questions.count == 0`. `StandardQueryValidator` copies `query.questions` verbatim into every error response; without this assertion a regression that accidentally populated the questions array (e.g. substituting a non-empty default) would pass the test undetected.
+        #expect(0 == response?.questions.count)
         #expect(0 == response?.answers.count)
     }
 

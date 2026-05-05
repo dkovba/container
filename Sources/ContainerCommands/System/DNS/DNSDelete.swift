@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 17:56 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -41,6 +42,10 @@ extension Application {
             var localhostIP: IPAddress?
             do {
                 localhostIP = try resolver.deleteDomain(name: domainName)
+            // Flagged #1: HIGH: `deleteDomain` catch block swallows `ContainerizationError`
+            // The single generic `catch` clause wraps every error from `resolver.deleteDomain(name:)` in a new `ContainerizationError(.invalidState)`.
+            } catch let error as ContainerizationError {
+                throw error
             } catch {
                 throw ContainerizationError(.invalidState, message: "cannot delete domain (try sudo?)")
             }

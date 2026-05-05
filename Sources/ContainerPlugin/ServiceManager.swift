@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-06 13:13 — 0 critical, 1 high, 1 medium, 0 low (2 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -87,6 +88,9 @@ public struct ServiceManager {
 
         // The third field of each line of launchctl list output is the label
         return outputText.split { $0.isNewline }
+            // Flagged #2: MEDIUM: `enumerate()` includes header line in results
+            // `launchctl list` outputs a header line ("PID\tStatus\tLabel") as its first line. The code splits by newlines and processes all lines, so the header passes the `count >= 3` filter and "Label" is returned as a spurious entry in the array.
+            .dropFirst()
             .map { String($0).split { $0.isWhitespace } }
             .filter { $0.count >= 3 }
             .map { String($0[2]) }
@@ -94,7 +98,9 @@ public struct ServiceManager {
 
     /// Check if a service has been registered or not.
     public static func isRegistered(fullServiceLabel label: String) throws -> Bool {
-        let exitStatus = try runLaunchctlCommand(args: ["list", label])
+        // Flagged #1: HIGH: `isRegistered()` passes domain-qualified target to `launchctl list`
+        // The `fullServiceLabel` parameter is a domain-qualified service target (e.g., "gui/501/com.apple.httpd"), consistent with its use in `deregister`, `kickstart`, and `kill`. However, `launchctl list` expects a bare label (e.g., "com.apple.httpd"), so it always fails to find the service and returns non-zero.
+        let exitStatus = try runLaunchctlCommand(args: ["print", label])
         return exitStatus == 0
     }
 

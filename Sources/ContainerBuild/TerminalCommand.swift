@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 12:35 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -46,6 +47,8 @@ struct TerminalCommand: Codable {
     func json() throws -> String? {
         let encoder = JSONEncoder()
         let data = try encoder.encode(self)
-        return data.base64EncodedString().trimmingCharacters(in: CharacterSet(charactersIn: "="))
+        // Flagged #1: HIGH: `json()` returns base64 instead of JSON string
+        // `data.base64EncodedString().trimmingCharacters(in: CharacterSet(charactersIn: "="))` encodes the JSON data as base64 and strips padding characters, rather than converting the JSON-encoded bytes to a UTF-8 string. A method named `json()` that uses `JSONEncoder` should return the JSON representation, not a base64-encoded blob.
+        return String(data: data, encoding: .utf8)
     }
 }

@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-29 21:39 — 0 critical, 0 high, 1 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -113,6 +114,9 @@ class TestCLIExecCommand: CLITest {
             let name = getTestName()
             try doLongRun(name: name, containerArgs: ["sh"], autoRemove: false)
             defer {
+                // Flagged #1: MEDIUM: `defer` cleanup fails to remove container when it is still running in `testExecOnExitingContainer`
+                // The `defer` block called `doRemove(name:)` without first calling `doStop(name:)`. Because the container was created with `autoRemove: false` and restarted via `doStart`, it could still be running when the `defer` executes. `doRemove` (which invokes `container delete`) fails on a running container, and `try?` silently swallows the error, leaving the container leaked.
+                try? doStop(name: name)
                 try? doRemove(name: name)
             }
             // Give time for container process to exit due to no stdin

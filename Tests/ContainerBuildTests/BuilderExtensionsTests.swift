@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-09 04:50 — 0 critical, 3 high, 2 medium, 1 low (6 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -183,6 +184,15 @@ import Testing
         #expect(false == fileURL.parentOf(httpURL))
     }
 
+    // Flagged #1: HIGH: `parentOf(_:)` incorrectly returns `true` for non-absolute parent paths
+    // The test suite had no coverage for the case where the receiver URL has a non-absolute `cleanPath` (e.g. a URL created with `URL(string: "relative/path")`). The original source bug caused `parentOf(_:)` to return `true` unconditionally in the `guard parentPath.fs_isAbsolute else { return true }` branch (URL+Extensions.swift:62), bypassing all component-comparison logic and falsely claiming that any non-absolute URL is a parent of every other URL.
+    @Test func testParentOfNonAbsoluteURL() throws {
+        let relativeURL = URL(string: "relative/path")!
+        let childDir = baseTempURL.appendingPathComponent("dir4")
+        try createDirectory(at: childDir)
+        #expect(false == relativeURL.parentOf(childDir))
+    }
+
     @Test func testRelativeChildPathDirectChild() throws {
         let parentDir = baseTempURL.appendingPathComponent("dir1")
         let childFile = parentDir.appendingPathComponent("dir2").appendingPathComponent("file")
@@ -333,5 +343,81 @@ import Testing
 
         #expect(urlFromString.cleanPath == fileWithSpace.cleanPath)
         #expect(urlFromString.cleanPath.hasSuffix("/my file"))
+    }
+
+    // Flagged #4: MEDIUM: `relativePathFrom(from:)` returns an absolute path when the two URLs share no common prefix
+    // The test suite had no coverage for `relativePathFrom(from:)` at all, and in particular no test for the zero-common-prefix case. The original source bug was a `guard common > 0 else { return cleanPath }` early-exit (URL+Extensions.swift:88) that returned the destination's absolute clean path instead of the correct relative path whenever the two URLs share no path components.
+    @Test func testRelativePathFromNoCommonPrefix() {
+        let url = URL(fileURLWithPath: "/foo/bar")
+        let base = URL(fileURLWithPath: "/baz/qux")
+        let result = url.relativePathFrom(from: base)
+        #expect(result == "../../foo/bar")
+    }
+
+    // Flagged #6: LOW: `zeroCopyReader` yields empty `Data` objects into the async stream
+    // The test suite had no coverage for `zeroCopyReader`. The original source bug was the condition `ddata.count > -1` (URL+Extensions.swift:124), which is always `true` because `DispatchData.count` is an `Int` that is always `>= 0`. This caused every `DispatchIO` callback — including intermediate callbacks that deliver zero bytes — to yield an empty `Data()` into the stream.
+    @Test func testZeroCopyReaderNoEmptyChunks() async throws {
+        let fileURL = baseTempURL.appendingPathComponent("testfile")
+        try createFile(at: fileURL, content: "Hello, World!")
+
+        let stream = try fileURL.zeroCopyReader()
+        for await chunk in stream {
+            #expect(chunk.count > 0)
+        }
+    }
+}
+
+// Flagged #2 (1 of 2)
+@Suite struct BuildTransferExtensionTests {
+
+    // Flagged #2 (2 of 2): HIGH: `BuildTransfer.followPaths()` always returns `nil` due to wrong metadata key
+    // The test suite had no coverage for `BuildTransfer.followPaths()`. The original source bug was that `followPaths()` looked up `self.metadata["followpaths"]` (BuildAPI+Extensions.swift:50), while every sender writes the key using the hyphenated convention shared by all other fields in the same extension (`"include-patterns"`, `"stage"`, `"mode"`, etc.). The correct key is `"follow-paths"`. Because the key never matched, the `guard let` always fell through and the function unconditionally returned `nil`.
+    @Test func testFollowPathsReadsFromCorrectKey() {
+        var t = BuildTransfer()
+        t.metadata["follow-paths"] = "path1,path2"
+        #expect(t.followPaths() == ["path1", "path2"])
+    }
+
+    // Flagged #5: MEDIUM: `BuildTransfer.mode()` returns empty string instead of `nil`
+    // The test suite had no coverage for `BuildTransfer.mode()`. The original source bug was that `mode()` returned `self.metadata["mode"]` directly (BuildAPI+Extensions.swift:59) without mapping an empty-string value to `nil`. Every other string-returning method in the same `BuildTransfer` extension (`stage()`, `method()`, `followPaths()`) maps `""` to `nil`, but `mode()` was missing this guard.
+    @Test func testModeEmptyStringReturnsNil() {
+        var t = BuildTransfer()
+        t.metadata["mode"] = ""
+        #expect(t.mode() == nil)
+    }
+}
+
+// Flagged #3 (1 of 2)
+@Suite class FileInfoTests {
+
+    private var baseTempURL: URL!
+    private let fileManager = FileManager.default
+
+    init() throws {
+        let rawURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("FileInfoTests-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: rawURL, withIntermediateDirectories: true, attributes: nil)
+        baseTempURL = rawURL.resolvingSymlinksInPath()
+    }
+
+    deinit {
+        if let baseTempURL = baseTempURL {
+            try? fileManager.removeItem(at: baseTempURL)
+        }
+    }
+
+    // Flagged #3 (2 of 2): HIGH: `FileInfo.init` computes incorrect relative symlink target path
+    // The test suite had no coverage for symlink handling in `BuildFSSync.FileInfo.init`. The original source bug was that the symlink target's relative path was computed as `target.relativePathFrom(from: path)` — using the symlink file itself as the base — rather than `target.relativePathFrom(from: path.deletingLastPathComponent())` (BuildFSSync.swift:343). Because `relativePathFrom(from:)` treats every component of `base` (including the filename) when counting `..` levels, using the symlink file path rather than its parent directory produced one extra `../` prefix in the stored target.
+    @Test func testFileInfoSymlinkTargetIsRelativeToParentDirectory() throws {
+        let subdir = baseTempURL.appendingPathComponent("subdir")
+        let targetFile = subdir.appendingPathComponent("target.txt")
+        try fileManager.createDirectory(at: subdir, withIntermediateDirectories: true, attributes: nil)
+        try "content".write(to: targetFile, atomically: true, encoding: .utf8)
+
+        let symlinkURL = baseTempURL.appendingPathComponent("link")
+        try fileManager.createSymbolicLink(at: symlinkURL, withDestinationURL: targetFile)
+
+        let info = try BuildFSSync.FileInfo(path: symlinkURL, contextDir: baseTempURL)
+        #expect(info.target == "subdir/target.txt")
     }
 }

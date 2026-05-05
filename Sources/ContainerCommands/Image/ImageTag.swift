@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-02 19:21 — 0 critical, 0 high, 0 medium, 1 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -37,7 +38,9 @@ extension Application {
             let existing = try await ClientImage.get(reference: source)
             let targetReference = try ClientImage.normalizeReference(target)
             try await existing.tag(new: targetReference)
-            print(target)
+            // Flagged #1: LOW: `run()` prints un-normalized target reference
+            // After calling `ClientImage.normalizeReference(target)` to produce the canonical reference `targetReference`, the command prints `target` (the raw user-supplied string) instead of `targetReference`. This means the output can differ from the reference that was actually created — for example, omitting a registry prefix or default tag that normalization added.
+            print(targetReference)
         }
     }
 }

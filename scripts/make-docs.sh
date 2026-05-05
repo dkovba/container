@@ -1,4 +1,5 @@
 #! /bin/bash -e
+# fix-bugs: 2026-05-09 18:54 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 # Copyright © 2025-2026 Apple Inc. and the container project authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -39,7 +40,9 @@ if [ ! -z "$2" ] ; then
     opts+=("--hosting-base-path" "$2")
 fi
 
-/usr/bin/swift package ${opts[@]}
+# Flagged #1: HIGH: Unquoted array expansion causes argument splitting on paths with spaces
+# `${opts[@]}` is expanded without double-quotes, so bash performs word-splitting on every element. Any argument value containing whitespace — such as the output directory path passed via `$1` (used for both `--allow-writing-to-directory` and `--output-path`) or the hosting base path passed via `$2` (used for `--hosting-base-path`) — is broken into multiple tokens, producing malformed arguments to `swift package`.
+/usr/bin/swift package "${opts[@]}"
 
 echo '{}' > "$1/theme-settings.json"
 

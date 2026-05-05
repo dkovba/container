@@ -1,3 +1,4 @@
+// fix-bugs: 2026-04-28 18:47 — 0 critical, 2 high, 2 medium, 0 low (4 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -94,7 +95,9 @@ public final class Archiver: Sendable {
 
             for info in entryInfo {
                 guard let entry = try Self._createEntry(entryInfo: info) else {
-                    throw Error.failedToCreateEntry
+                    // Flagged #4: MEDIUM: `compress` throws on non-archivable file types instead of skipping them
+                    // `_createEntry` deliberately returns `nil` for file types that cannot be archived (block specials, character specials, sockets, and unknown types). However, the call site in `compress` treats a `nil` return as a fatal error (`throw Error.failedToCreateEntry`) instead of skipping the entry. Any directory containing a Unix domain socket or other special file causes the entire archive operation to fail.
+                    continue
                 }
                 hasher.update(data: try encoder.encode(entry))
                 try Self._compressFile(item: info.pathOnHost, entry: entry, archiver: archiver, hasher: &hasher)
@@ -113,6 +116,9 @@ public final class Archiver: Sendable {
         let writer = archiver.makeTransactionWriter()
         let bufferSize = Int(1.mib())
         let readBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        // Flagged #1: HIGH: `_compressFile` leaks allocated read buffer
+        // `readBuffer` is allocated via `UnsafeMutablePointer<UInt8>.allocate(capacity:)` but never deallocated. Every call to `_compressFile` leaks `bufferSize` (1 MiB) of memory, whether the function returns normally or throws.
+        defer { readBuffer.deallocate() }
         try writer.writeHeader(entry: entry)
         if entry.fileType == .regular {
             // We need to write the data into the archive only if its a regular file
@@ -121,10 +127,15 @@ public final class Archiver: Sendable {
                 throw Error.failedToCreateInputStream(item)
             }
             stream.open()
+            defer { stream.close() }
             while true {
                 let byteRead = stream.read(readBuffer, maxLength: bufferSize)
-                if byteRead <= 0 {
+                // Flagged #2: HIGH: `_compressFile` silently ignores stream read errors
+                // `InputStream.read` returns a negative value to signal an error, but the original condition `if byteRead <= 0 { break }` treats errors identically to end-of-stream, silently producing a truncated archive with no error reported to the caller.
+                if byteRead == 0 {
                     break
+                } else if byteRead < 0 {
+                    throw stream.streamError ?? Error.failedToCreateInputStream(item)
                 } else {
                     let data = Data(bytesNoCopy: UnsafeMutableRawPointer(mutating: readBuffer), count: byteRead, deallocator: .none)
                     hasher.update(data: data)
@@ -133,7 +144,6 @@ public final class Archiver: Sendable {
                     }
                 }
             }
-            stream.close()
         }
         try writer.finish()
     }
@@ -212,7 +222,9 @@ public final class Archiver: Sendable {
         guard decodedPath.hasPrefix(pathPrefix) else {
             return decodedPath
         }
-        let trimmedPath = String(decodedPath.suffix(from: pathPrefix.endIndex))
+        // Flagged #3: MEDIUM: `_trimPathPrefix` uses one string's index on a different string
+        // `decodedPath.suffix(from: pathPrefix.endIndex)` uses `pathPrefix.endIndex` — an index belonging to `pathPrefix` — to subscript into `decodedPath`. Swift `String.Index` values are not interchangeable between different `String` instances; when the two strings have different underlying storage layouts this produces incorrect slicing or a runtime trap.
+        let trimmedPath = String(decodedPath.dropFirst(pathPrefix.count))
         return trimmedPath
     }
 }

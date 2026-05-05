@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-06 16:11 — 0 critical, 1 high, 0 medium, 0 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2025-2026 Apple Inc. and the container project authors.
 //
@@ -103,6 +104,9 @@ extension GlueHandler: ChannelDuplexHandler {
 
     func errorCaught(context: ChannelHandlerContext, error: Error) {
         self.partner?.partnerCloseFull()
+        // Flagged #1: HIGH: `errorCaught` fails to close its own channel, leaving it open after an error
+        // `errorCaught` only called `self.partner?.partnerCloseFull()` to close the partner channel but never closed its own channel. If the partner reference is nil or the partner's context is already nil (e.g., the partner handler was already removed), the optional-chaining call silently no-ops and the errored channel remains open indefinitely, leaking the file descriptor and associated resources.
+        context.close(promise: nil)
     }
 
     func channelWritabilityChanged(context: ChannelHandlerContext) {

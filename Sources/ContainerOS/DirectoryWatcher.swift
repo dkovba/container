@@ -1,3 +1,4 @@
+// fix-bugs: 2026-05-05 15:04 — 0 critical, 0 high, 0 medium, 1 low (1 total)
 //===----------------------------------------------------------------------===//
 // Copyright © 2026 Apple Inc. and the container project authors.
 //
@@ -85,7 +86,9 @@ public actor DirectoryWatcher {
         handler: @escaping ([URL]) throws -> Void
     ) throws {
         let descriptor = open(directoryURL.path, O_EVTONLY)
-        guard descriptor > 0 else {
+        // Flagged #1: LOW: `_startWatching` rejects valid file descriptor 0
+        // `guard descriptor > 0` incorrectly treats file descriptor 0 as an error. The `open()` system call returns -1 on failure; 0 is a valid file descriptor. This causes the method to throw an error and fail to set up the directory watcher when fd 0 happens to be assigned.
+        guard descriptor >= 0 else {
             throw ContainerizationError(.internalError, message: "cannot open \(directoryURL.path), descriptor=\(descriptor)")
         }
 

@@ -1,4 +1,5 @@
 #! /bin/bash -f
+# fix-bugs: 2026-05-09 18:16 — 0 critical, 0 high, 0 medium, 2 low (2 total)
 # Copyright © 2025-2026 Apple Inc. and the container project authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,10 +21,17 @@ usage() {
     echo "Stop container services"
     echo
     echo "Options:"
-    echo "a     Stop container services in all launchd domains."
-    echo "h     Show this help message."
+    # Flagged #2: LOW: Options listed in `usage()` without leading `-`
+    # The usage text displayed `a` and `h` as option names instead of `-a`
+    # and `-h`, mismatching the flags that `getopts` actually accepts.
+    echo "  -a    Stop container services in all launchd domains."
+    echo "  -h    Show this help message."
     echo
-    exit 1
+    # Flagged #1 (1 of 2): LOW: `usage()` always exits with code 1, even when invoked for `-h`
+    # `usage()` unconditionally calls `exit 1`. The `h)` case in the getopts
+    # loop calls `usage` directly, so passing `-h` to the script exits with status 1
+    # (failure) instead of 0 (success).
+    exit "${1:-1}"
 }
 
 while getopts ":ah" arg; do
@@ -32,7 +40,8 @@ while getopts ":ah" arg; do
             ALL_DOMAINS=true
             ;;
         h)
-            usage
+            # Flagged #1 (2 of 2)
+            usage 0
             ;;
         *)
             echo "Invalid option: -${OPTARG}"
